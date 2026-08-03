@@ -1,0 +1,86 @@
+import type { DeepPartial, GanttEngineOptions } from './types';
+
+export const MINUTE = 60_000;
+export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
+export const WEEK = 7 * DAY;
+export const YEAR = 365 * DAY;
+
+export const defaultOptions: GanttEngineOptions = {
+  metrics: {
+    laneHeight: 26,
+    rowPaddingY: 4,
+    itemPaddingY: 3,
+    minRowHeight: 34,
+    minItemWidth: 2,
+  },
+  stacking: {
+    enabled: true,
+    minGap: 0,
+    maxLanes: 64,
+    rollupCollapsed: true,
+  },
+  virtualization: {
+    overscanPx: 240,
+    overscanRows: 2,
+    maxVisibleItems: 4000,
+  },
+  interaction: {
+    selection: true,
+    multiSelect: true,
+    drag: true,
+    resize: true,
+    snapMs: 0,
+    marquee: true,
+    wheel: {
+      plain: 'scroll',
+      ctrl: 'zoom',
+      shift: 'pan',
+      alt: 'none',
+    },
+  },
+  minTimeSpan: MINUTE,
+  maxTimeSpan: 50 * YEAR,
+};
+
+/** Merge a partial config over the defaults, one level into each section. */
+export function resolveOptions(
+  partial: DeepPartial<GanttEngineOptions> | undefined,
+  base: GanttEngineOptions = defaultOptions,
+): GanttEngineOptions {
+  if (!partial) return base;
+  return {
+    ...base,
+    ...(partial as Partial<GanttEngineOptions>),
+    metrics: { ...base.metrics, ...partial.metrics },
+    stacking: { ...base.stacking, ...partial.stacking },
+    virtualization: { ...base.virtualization, ...partial.virtualization },
+    interaction: {
+      ...base.interaction,
+      ...partial.interaction,
+      wheel: { ...base.interaction.wheel, ...partial.interaction?.wheel },
+    },
+  };
+}
+
+/** Option changes that force a stacking/layout recomputation. */
+export function affectsLayout(previous: GanttEngineOptions, next: GanttEngineOptions): boolean {
+  const a = previous.metrics;
+  const b = next.metrics;
+  if (
+    a.laneHeight !== b.laneHeight ||
+    a.rowPaddingY !== b.rowPaddingY ||
+    a.minRowHeight !== b.minRowHeight ||
+    a.itemPaddingY !== b.itemPaddingY
+  ) {
+    return true;
+  }
+  const s = previous.stacking;
+  const t = next.stacking;
+  return (
+    s.enabled !== t.enabled ||
+    s.minGap !== t.minGap ||
+    s.maxLanes !== t.maxLanes ||
+    s.rollupCollapsed !== t.rollupCollapsed
+  );
+}

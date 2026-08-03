@@ -1,0 +1,318 @@
+/*
+ * Chrome for the Gantt widget.
+ *
+ * Colours come from the theme as CSS custom properties (see
+ * `themeCssVariables`), so a theme switch repaints the DOM parts without
+ * re-rendering React. Only layout lives here.
+ */
+
+.gantt {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  border: 1px solid var(--gantt-border);
+  border-radius: 6px;
+  font-family: var(--gantt-font-family);
+  font-size: var(--gantt-font-size);
+  color: var(--gantt-text);
+  background: var(--gantt-background);
+  box-sizing: border-box;
+  /* The plot is a canvas; text selection would only ever select the chrome. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gantt *,
+.gantt *::before,
+.gantt *::after {
+  box-sizing: inherit;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.gantt__header-row {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--gantt-border);
+  background: var(--gantt-background);
+}
+
+.gantt__corner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  padding: 4px 8px;
+  border-right: 1px solid var(--gantt-border);
+  color: var(--gantt-text-muted);
+  font-size: var(--gantt-label-size);
+  overflow: hidden;
+}
+
+.gantt__header-scale {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.gantt-header {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.gantt-header__bands,
+.gantt-header__ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+.gantt-header__bands {
+  top: 0;
+  height: 50%;
+  border-bottom: 1px solid var(--gantt-grid-line);
+}
+
+.gantt-header__ticks {
+  bottom: 0;
+  height: 50%;
+}
+
+.gantt-header__band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  border-left: 1px solid var(--gantt-grid-line-strong);
+  color: var(--gantt-text);
+  font-weight: 600;
+  font-size: var(--gantt-label-size);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gantt-header__band:first-child {
+  border-left: none;
+}
+
+.gantt-header__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  border-left: 1px solid var(--gantt-grid-line);
+  color: var(--gantt-text-muted);
+  font-size: var(--gantt-label-size);
+  white-space: nowrap;
+  /* Labels must not swallow pointer events meant for the plot below. */
+  pointer-events: none;
+}
+
+.gantt-header__tick.is-major {
+  border-left-color: var(--gantt-grid-line-strong);
+  color: var(--gantt-text);
+}
+
+/* ------------------------------------------------------------------ body */
+
+.gantt__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.gantt__plot-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gantt-plot {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+}
+
+.gantt-plot:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--gantt-accent);
+}
+
+/* ---------------------------------------------------------------- gutter */
+
+.gantt-gutter {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-right: 1px solid var(--gantt-border);
+  background: var(--gantt-background);
+}
+
+.gantt-gutter__row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--gantt-grid-line);
+  background: var(--gantt-row-even);
+}
+
+.gantt-gutter__row.is-odd {
+  background: var(--gantt-row-odd);
+}
+
+.gantt-gutter__row.is-hovered {
+  background: var(--gantt-row-hover);
+}
+
+.gantt-gutter__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding-right: 8px;
+  overflow: hidden;
+}
+
+.gantt-gutter__text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-gutter__toggle,
+.gantt-gutter__toggle-spacer {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.gantt-gutter__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--gantt-text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.gantt-gutter__toggle:hover {
+  background: var(--gantt-row-selected);
+  color: var(--gantt-text);
+}
+
+.gantt-gutter__toggle.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.gantt-gutter__lanes {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--gantt-row-selected);
+  color: var(--gantt-text-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* ------------------------------------------------------------- scrollbar */
+
+.gantt-scrollbar {
+  position: relative;
+  flex: 0 0 auto;
+  border-left: 1px solid var(--gantt-border);
+}
+
+.gantt-scrollbar__thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  border-radius: 4px;
+  cursor: grab;
+}
+
+.gantt-scrollbar__thumb:active {
+  cursor: grabbing;
+}
+
+/* --------------------------------------------------------------- tooltip */
+
+.gantt-tooltip {
+  position: absolute;
+  z-index: 20;
+  max-width: 280px;
+  padding: 6px 8px;
+  border: 1px solid var(--gantt-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.gantt-tooltip__title {
+  font-weight: 600;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gantt-tooltip__row {
+  color: var(--gantt-text-muted);
+  font-size: var(--gantt-label-size);
+}
+
+/* ------------------------------------------------------------------ menu */
+
+.gantt-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--gantt-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+
+.gantt-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gantt-menu__item:hover:not(:disabled) {
+  background: var(--gantt-row-hover);
+}
+
+.gantt-menu__item:disabled {
+  color: var(--gantt-text-muted);
+  cursor: default;
+}
+
+.gantt-menu__separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--gantt-border);
+}

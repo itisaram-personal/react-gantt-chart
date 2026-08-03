@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  --app-bg: #f4f6fa;
+  --app-panel: #ffffff;
+  --app-text: #1e293b;
+  --app-muted: #64748b;
+  --app-border: #d8dee9;
+}
+
+.app--dark {
+  --app-bg: #0b0f18;
+  --app-panel: #131a28;
+  --app-text: #e2e8f3;
+  --app-muted: #94a3b8;
+  --app-border: #2a3348;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  gap: 10px;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.app__bar,
+.app__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-panel);
+}
+
+.app__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.app__title strong {
+  font-size: 15px;
+}
+
+.app__muted {
+  color: var(--app-muted);
+}
+
+.app__field,
+.app__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.app__field select {
+  padding: 3px 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-panel);
+  color: inherit;
+  font: inherit;
+}
+
+.app__buttons {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.app__buttons button {
+  padding: 4px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-panel);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.app__buttons button:hover:not(:disabled) {
+  border-color: var(--app-muted);
+}
+
+.app__buttons button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.app__chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app__stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.app__stat strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.app__warn {
+  color: #dc2626;
+}
+
+.app__hint {
+  margin-left: auto;
+  color: var(--app-muted);
+}

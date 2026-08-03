@@ -1,0 +1,40 @@
+import type { GanttTheme } from '@gantt-chart/core';
+import { darkPalette } from './palette';
+import { defaultFont, defaultMetrics } from './shared';
+
+export const darkTheme: GanttTheme = {
+  name: 'dark',
+  dark: true,
+  colors: {
+    background: '#0f1420',
+    rowEven: '#0f1420',
+    rowOdd: '#141a28',
+    rowHover: '#1d2740',
+    rowSelected: '#243356',
+    border: '#2a3348',
+    gridLine: '#1c2333',
+    gridLineStrong: '#2a3348',
+    text: '#e2e8f3',
+    textMuted: '#94a3b8',
+    textInverse: '#0f1420',
+    accent: '#7aa2f7',
+    taskFill: '#4f7fe8',
+    taskStroke: '#8ab0ff',
+    taskText: '#ffffff',
+    milestoneFill: '#e2e8f3',
+    selectionFill: '#7aa2f7',
+    selectionStroke: '#ffffff',
+    hoverStroke: '#e2e8f3',
+    dragGhost: 'rgba(122, 162, 247, 0.35)',
+    dragPreviewStroke: '#a5c4ff',
+    marqueeFill: 'rgba(122, 162, 247, 0.16)',
+    marqueeStroke: '#7aa2f7',
+    todayLine: '#f87171',
+    dependencyLine: '#64748b',
+    scrollbarThumb: '#39435c',
+    scrollbarTrack: '#161d2c',
+  },
+  metrics: { ...defaultMetrics },
+  palette: darkPalette,
+  font: { ...defaultFont },
+};

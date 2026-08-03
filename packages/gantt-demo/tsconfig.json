@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@gantt-chart/core": ["../gantt-core/src/index.ts"],
+      "@gantt-chart/themes": ["../gantt-themes/src/index.ts"],
+      "@gantt-chart/echarts": ["../gantt-echarts/src/index.ts"],
+      "@gantt-chart/react": ["../gantt-react/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
