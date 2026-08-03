@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { darkTheme, lightTheme } from '@gantt-chart/themes';
-import { buildGanttOption } from '../src/option';
-import type { GanttElement } from '../src/elements';
+import { buildGanttOption, type GanttCustomSeries, type GanttOption } from '../src/option';
 import { computeTimeTicks } from '../src/timeScale';
 import { DAY, T0, fixture, flatten, ofType } from './helpers';
 
-function seriesById(option: { series: { id: string }[] }, id: string) {
+function seriesById(option: GanttOption, id: string): GanttCustomSeries | undefined {
   return option.series.find((series) => series.id === id);
 }
 
 /** Run a single-datum series' renderItem and flatten the result. */
-function renderSeries(option: { series: { id: string; renderItem: (p: { dataIndex: number }, api: unknown) => GanttElement | null }[] }, id: string, dataIndex = 0) {
-  const series = option.series.find((entry) => entry.id === id);
+function renderSeries(option: GanttOption, id: string, dataIndex = 0) {
+  const series = seriesById(option, id);
   if (!series) throw new Error(`no series ${id}`);
   return flatten(series.renderItem({ dataIndex }, null));
 }
@@ -343,9 +342,37 @@ describe('theming and progressive rendering', () => {
 
   it('passes the progressive threshold through to the item series', () => {
     const { engine, theme } = fixture();
-    const option = buildGanttOption({ engine, theme, progressiveThreshold: 500, progressiveChunkSize: 250 });
+    const option = buildGanttOption({
+      engine,
+      theme,
+      progressiveThreshold: 500,
+      progressiveChunkSize: 250,
+      // The fixture is tiny, so opt it past the dataset gate — what is under test
+      // here is the plumbing, not the gate.
+      progressiveMinTasks: 0,
+    });
     const items = seriesById(option, 'gantt-items');
     expect(items?.progressiveThreshold).toBe(500);
     expect(items?.progressive).toBe(250);
+  });
+
+  it('switches chunking off for a dataset below the gate', () => {
+    const { engine, theme } = fixture({ groups: 3, tasksPerGroup: 4 });
+    const option = buildGanttOption({ engine, theme, progressiveChunkSize: 250, progressiveMinTasks: 50_000 });
+    // 12 tasks. `progressive: 0` is how ECharts is told to draw in one pass.
+    expect(seriesById(option, 'gantt-items')?.progressive).toBe(0);
+  });
+
+  it('chunks once the dataset reaches the gate', () => {
+    const { engine, theme } = fixture({ groups: 4, tasksPerGroup: 5 });
+    expect(engine.getDataModel().tasks).toHaveLength(20);
+
+    const option = buildGanttOption({ engine, theme, progressiveChunkSize: 250, progressiveMinTasks: 20 });
+    expect(seriesById(option, 'gantt-items')?.progressive).toBe(250);
+  });
+
+  it('gates on the dataset by default, so a small chart is never chunked', () => {
+    const { engine, theme } = fixture();
+    expect(seriesById(buildGanttOption({ engine, theme }), 'gantt-items')?.progressive).toBe(0);
   });
 });

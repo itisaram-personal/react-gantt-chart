@@ -39,6 +39,8 @@ export interface GanttAdapterOptions<T = unknown, G = unknown> {
   showRowBands?: boolean;
   showGrid?: boolean;
   progressiveThreshold?: number;
+  /** Datasets smaller than this skip progressive chunking. Defaults to 50 000. */
+  progressiveMinTasks?: number;
   /** Attach pointer handlers (selection, drag, marquee, hover, menus). */
   pointer?: boolean;
   wheel?: boolean;
@@ -191,6 +193,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       showRowBands: this.options.showRowBands,
       showGrid: this.options.showGrid,
       progressiveThreshold: this.options.progressiveThreshold,
+      progressiveMinTasks: this.options.progressiveMinTasks,
     });
     if (this.options.transformOption) option = this.options.transformOption(option);
 

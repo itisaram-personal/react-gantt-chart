@@ -4,6 +4,7 @@ import { act } from 'react-dom/test-utils';
 import type { GanttEngine, GanttGroup, GanttTask } from '@gantt-chart/core';
 import { GanttChart, type GanttChartProps } from '../src/GanttChart';
 
+export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
 /** 2026-03-02 00:00 local — a Monday. */
 export const T0 = new Date(2026, 2, 2).getTime();
@@ -28,6 +29,40 @@ export function installLayout(width = PLOT_WIDTH, height = PLOT_HEIGHT): void {
   define('clientWidth', width);
   define('clientHeight', height);
 
+  /*
+   * zrender measures label widths through a 2d context even when rendering SVG.
+   * jsdom has no canvas implementation, so without a stub every frame logs a
+   * "not implemented" warning; an approximate width is all the measurement is
+   * used for here.
+   */
+  const canvas = HTMLCanvasElement.prototype as unknown as { getContext: unknown; __stubbed?: boolean };
+  if (!canvas.__stubbed) {
+    canvas.__stubbed = true;
+    canvas.getContext = (): unknown => ({
+      font: '',
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      fillText: () => {},
+      save: () => {},
+      restore: () => {},
+      setTransform: () => {},
+      clearRect: () => {},
+    });
+  }
+
+  /*
+   * jsdom implements no pointer capture, and the zoom bars capture so a drag
+   * survives the pointer leaving the handle. No-ops are enough: the tests
+   * dispatch every move at the element that took the capture anyway.
+   */
+  const element = HTMLElement.prototype as unknown as Record<string, unknown>;
+  if (typeof element.setPointerCapture !== 'function') {
+    element.setPointerCapture = function setPointerCapture(): void {};
+    element.releasePointerCapture = function releasePointerCapture(): void {};
+    element.hasPointerCapture = function hasPointerCapture(): boolean {
+      return true;
+    };
+  }
+
   HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect(): DOMRect {
     return {
       x: 0,
@@ -48,9 +83,30 @@ export interface Fixture {
   groups: GanttGroup[];
 }
 
-/** Three groups of four one-day tasks, two days apart. */
-export function fixtureData(options: { groups?: number; tasksPerGroup?: number; nested?: boolean } = {}): Fixture {
-  const { groups: groupCount = 3, tasksPerGroup = 4, nested = false } = options;
+export interface FixtureOptions {
+  groups?: number;
+  tasksPerGroup?: number;
+  nested?: boolean;
+  /**
+   * Items per row — how many stacking lanes each group is forced to occupy.
+   *
+   * Tasks are dealt round-robin into this many lanes. Those sharing a lane are
+   * spaced two days apart, while the ones sharing a *column* overlap, so the
+   * allocator has to give each its own lane. The default of 1 lays every task
+   * out end to end in a single lane.
+   */
+  lanesPerGroup?: number;
+}
+
+/**
+ * Three groups of four one-day tasks, two days apart.
+ *
+ * Pass `lanesPerGroup` to make the tasks overlap and stack instead — see
+ * {@link FixtureOptions.lanesPerGroup}.
+ */
+export function fixtureData(options: FixtureOptions = {}): Fixture {
+  const { groups: groupCount = 3, tasksPerGroup = 4, nested = false, lanesPerGroup = 1 } = options;
+  const lanes = Math.max(1, lanesPerGroup);
   const groups: GanttGroup[] = [];
   const tasks: Fixture['tasks'] = [];
 
@@ -61,11 +117,17 @@ export function fixtureData(options: { groups?: number; tasksPerGroup?: number; 
       ...(nested && g > 0 ? { parentId: 'g0' } : null),
     });
     for (let t = 0; t < tasksPerGroup; t++) {
+      // Column = position along the timeline, lane = row within the stack.
+      const column = Math.floor(t / lanes);
+      const lane = t % lanes;
+      const columnStart = T0 + column * 2 * DAY;
       tasks.push({
         id: `g${g}-t${t}`,
         groupId: `g${g}`,
-        start: T0 + t * 2 * DAY,
-        end: T0 + (t * 2 + 1) * DAY,
+        // Staggered by an hour so starts stay distinct, but every task in a
+        // column ends together — mutual overlap, hence one lane each.
+        start: columnStart + lane * HOUR,
+        end: columnStart + DAY,
         data: { label: `Task ${g}.${t}` },
       });
     }
@@ -145,6 +207,18 @@ export function renderChart<T = { label: string }, G = unknown>(
   };
 }
 
+/**
+ * Drive the engine directly from a test.
+ *
+ * Engine mutations notify store subscribers, which sets React state — so they
+ * have to happen inside `act` just like an event dispatch does.
+ */
+export function run(fn: () => void): void {
+  act(() => {
+    fn();
+  });
+}
+
 /** Dispatch an event jsdom does not construct natively (pointer events). */
 export function dispatch(
   target: EventTarget,
@@ -159,6 +233,26 @@ export function dispatch(
   act(() => {
     target.dispatchEvent(event);
   });
+}
+
+/**
+ * Press, move and release on one element — the gesture the zoom bars expect.
+ *
+ * `installLayout` reports every box as 800×400 at the origin, so a client
+ * coordinate here is also an offset into the track.
+ */
+export function drag(
+  target: EventTarget,
+  from: { clientX?: number; clientY?: number },
+  to: { clientX?: number; clientY?: number },
+): void {
+  const at = (point: { clientX?: number; clientY?: number }): MouseEventInit => ({
+    clientX: point.clientX ?? 0,
+    clientY: point.clientY ?? 0,
+  });
+  dispatch(target, 'pointerdown', at(from));
+  dispatch(target, 'pointermove', at(to));
+  dispatch(target, 'pointerup', at(to));
 }
 
 export function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): void {

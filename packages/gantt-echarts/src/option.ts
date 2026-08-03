@@ -58,6 +58,17 @@ export interface GanttOptionInput<T = unknown, G = unknown> {
   /** Bars beyond this count are rendered in progressive chunks. */
   progressiveThreshold?: number;
   progressiveChunkSize?: number;
+  /**
+   * Datasets smaller than this render in a single pass, with progressive
+   * chunking switched off entirely.
+   *
+   * Chunking only pays for itself when a frame is big enough that splitting it
+   * beats the cost of painting across several frames. Below that it is a
+   * liability: the frame lands in visible pieces, and because a chunked frame is
+   * not committed all at once, a fast pan can show a half-drawn plot. Small and
+   * medium datasets are far quicker to just draw.
+   */
+  progressiveMinTasks?: number;
 }
 
 const Z_BACKGROUND = 1;
@@ -80,6 +91,7 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
     showGrid = true,
     progressiveThreshold = 3000,
     progressiveChunkSize = 1000,
+    progressiveMinTasks = 50_000,
   } = input;
 
   const window = engine.getVisible();
@@ -108,6 +120,14 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
   });
 
   const items = window.items;
+
+  /*
+   * Gated on the *dataset* size, not on how many bars this frame happens to
+   * hold: whether chunking is worth it is a property of the data you are asked
+   * to draw, and keying it on the frame would flip the mode mid-pan as bars come
+   * in and out of view. `progressive: 0` is ECharts' own off switch.
+   */
+  const chunked = engine.getDataModel().tasks.length >= progressiveMinTasks;
 
   const series: GanttCustomSeries[] = [
     {
@@ -139,7 +159,7 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
       silent: true,
       animation: false,
       emphasis: { disabled: true },
-      progressive: progressiveChunkSize,
+      progressive: chunked ? progressiveChunkSize : 0,
       progressiveThreshold,
       renderItem: (params) => {
         const item = items[params.dataIndex];

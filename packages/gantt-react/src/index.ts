@@ -23,6 +23,9 @@ export type { GanttRowGutterProps } from './GanttRowGutter';
 export { GanttScrollbar } from './GanttScrollbar';
 export type { GanttScrollbarProps } from './GanttScrollbar';
 
+export { GanttTimeZoomBar, GanttRowZoomBar } from './GanttZoomBar';
+export type { GanttTimeZoomBarProps, GanttRowZoomBarProps } from './GanttZoomBar';
+
 export { GanttTooltip } from './GanttTooltip';
 export type { GanttTooltipProps, GanttTooltipContext } from './GanttTooltip';
 

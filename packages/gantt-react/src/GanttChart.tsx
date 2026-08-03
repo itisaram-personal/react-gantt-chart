@@ -27,6 +27,7 @@ import { GanttRowGutter } from './GanttRowGutter';
 import { GanttScrollbar } from './GanttScrollbar';
 import { GanttTimeHeader } from './GanttTimeHeader';
 import { GanttTooltip, type GanttTooltipContext } from './GanttTooltip';
+import { GanttRowZoomBar, GanttTimeZoomBar } from './GanttZoomBar';
 import { useGanttEngine } from './useGanttEngine';
 
 export interface GanttChartProps<T = unknown, G = unknown> {
@@ -67,6 +68,17 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   showScrollbar?: boolean;
   showGrid?: boolean;
   showRowBands?: boolean;
+  /**
+   * Horizontal zoom bar under the plot: an overview of the whole time domain
+   * with the visible window drawn on it. Drag the window to pan, its handles to
+   * zoom. Off by default — it adds a strip below the body.
+   */
+  showTimeZoomBar?: boolean;
+  /**
+   * Vertical zoom bar beside the plot. Drag the window to scroll, its handles to
+   * scale row height so the selected rows fill the plot. Off by default.
+   */
+  showRowZoomBar?: boolean;
   /** Overrides the theme's `axisWidth`. */
   gutterWidth?: number;
   headerCorner?: ReactNode;
@@ -107,6 +119,8 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     showScrollbar = true,
     showGrid,
     showRowBands,
+    showTimeZoomBar = false,
+    showRowZoomBar = false,
     now,
     locale,
     weekStartsOn,
@@ -244,8 +258,28 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
           )}
         </div>
 
+        {showRowZoomBar ? <GanttRowZoomBar engine={engine} theme={theme} /> : null}
         {showScrollbar ? <GanttScrollbar engine={engine} theme={theme} /> : null}
       </div>
+
+      {showTimeZoomBar ? (
+        <div className="gantt__zoom-row">
+          {showRowGutter ? (
+            <div
+              className="gantt__zoom-corner"
+              style={{ width: gutterWidth, borderRightColor: theme.colors.border }}
+            />
+          ) : null}
+          {/*
+            Deliberately not pixel-aligned with the plot's right edge: the bar
+            spans the whole *domain*, not the visible window, so it is an
+            overview rather than a second time axis to keep in register.
+          */}
+          <div className="gantt__zoom-scale">
+            <GanttTimeZoomBar engine={engine} theme={theme} />
+          </div>
+        </div>
+      ) : null}
 
       <GanttContextMenu engine={engine} theme={theme} items={props.contextMenuItems} />
     </div>

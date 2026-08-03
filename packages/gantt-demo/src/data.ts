@@ -46,7 +46,7 @@ export interface GenerateOptions {
   seed?: number;
   /** Anchor for the timeline; defaults to 90 days ago at midnight. */
   origin?: number;
-  /** Calendar span the projects are scattered across. */
+  /** Calendar span the project start dates are scattered across. */
   timelineDays?: number;
   withDependencies?: boolean;
 }
@@ -83,7 +83,7 @@ export function generate(options: GenerateOptions): DemoDataset {
 
   // One start offset per project, drawn up front so every task in a project
   // agrees on where its project begins.
-  const timelineDays = options.timelineDays ?? 540;
+  const timelineDays = options.timelineDays ?? 120;
   const projectOffsets = new Float64Array(projectCount);
   for (let project = 0; project < projectCount; project++) {
     projectOffsets[project] = Math.floor(random() * timelineDays) * DAY;
@@ -97,11 +97,14 @@ export function generate(options: GenerateOptions): DemoDataset {
     const withinProject = index % tasksPerProject;
     const groupId = `project-${project}`;
 
-    // Projects are scattered across a fixed 18-month timeline rather than laid
+    // Projects are scattered across one fixed calendar window rather than laid
     // end to end: growing the dataset then adds *rows*, which is what the
-    // virtualizer is for, instead of stretching the calendar into empty space.
+    // virtualizer is for, instead of stretching the timeline into empty space.
     const projectStart = origin + projectOffsets[project];
-    const start = projectStart + withinProject * 12 * HOUR + Math.floor(random() * 8) * HOUR;
+    // Tasks are spread over weeks rather than hours, so a project spans a
+    // realistic stretch of the calendar and neighbouring tasks overlap enough
+    // to need two or three stacking lanes.
+    const start = projectStart + withinProject * 3 * DAY + Math.floor(random() * 12) * HOUR;
     const isMilestone = withinProject > 0 && withinProject % 11 === 0;
     const duration = isMilestone ? 0 : (6 + Math.floor(random() * 90)) * HOUR;
 
