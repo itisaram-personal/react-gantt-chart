@@ -221,7 +221,14 @@ export interface TaskChange {
   previous: { start: number; end: number; groupId: GanttId };
 }
 
-export type ContextMenuTargetKind = 'task' | 'row' | 'axis' | 'background';
+/**
+ * What a menu was opened on.
+ *
+ * `row-options` is the odd one out: it comes from a deliberate click on a
+ * control (the row gutter's "more options" button) rather than a right-click, so
+ * a view layer may draw it differently and fill it from a different item source.
+ */
+export type ContextMenuTargetKind = 'task' | 'row' | 'axis' | 'row-options' | 'background';
 
 export interface ContextMenuState<T = unknown, G = unknown> {
   kind: ContextMenuTargetKind;
@@ -229,6 +236,12 @@ export interface ContextMenuState<T = unknown, G = unknown> {
   position: Point;
   task: GanttTask<T> | null;
   row: GanttRow<G> | null;
+  /**
+   * The control the menu belongs to, in *client* pixels, when it was opened from
+   * one rather than from a pointer position. A view layer attaches the menu to
+   * this box instead of guessing where the gesture happened.
+   */
+  anchor: Rect | null;
   /** Snapshot of the selection at the moment the menu opened. */
   selection: readonly GanttId[];
 }

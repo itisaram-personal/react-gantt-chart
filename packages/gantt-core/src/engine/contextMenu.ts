@@ -1,4 +1,4 @@
-import type { ContextMenuState, ContextMenuTargetKind, GanttId, GanttRow, GanttTask, Point } from '../types';
+import type { ContextMenuState, ContextMenuTargetKind, GanttId, GanttRow, GanttTask, Point, Rect } from '../types';
 import type { EngineContext } from './context';
 import type { SelectionEngine } from './selection';
 
@@ -7,6 +7,11 @@ export interface OpenContextMenuInput<T, G> {
   position: Point;
   task?: GanttTask<T> | null;
   row?: GanttRow<G> | null;
+  /**
+   * Client-space box of the control that opened the menu, for openers that are
+   * buttons rather than pointer gestures. See {@link ContextMenuState.anchor}.
+   */
+  anchor?: Rect | null;
   /**
    * Bring the target into the selection before opening, unless it is already
    * part of a multi-selection. This is what makes "right-click → act on the
@@ -47,6 +52,7 @@ export class ContextMenuEngine<T = unknown, G = unknown> {
       position: input.position,
       task,
       row: input.row ?? null,
+      anchor: input.anchor ?? null,
       selection: Array.from(this.selection.selected) as readonly GanttId[],
     };
 

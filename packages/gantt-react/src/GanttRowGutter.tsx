@@ -1,11 +1,13 @@
-import { useRef, type ReactNode } from 'react';
+import { useRef, type MouseEvent, type ReactNode } from 'react';
 import {
   computeAxisRows,
   shallowEqual,
   type AxisRowDescriptor,
   type GanttEngine,
+  type GanttRow,
   type GanttTheme,
 } from '@gantt-chart/core';
+import type { GanttMenuItem } from './GanttContextMenu';
 import { useEngineState } from './useEngineState';
 import { useNativeWheel } from './useNativeWheel';
 
@@ -15,6 +17,17 @@ export interface GanttRowGutterProps<T, G> {
   width: number;
   /** Replace the default label rendering. */
   renderRow?: (row: AxisRowDescriptor<G>) => ReactNode;
+  /**
+   * Show the per-row "more options" button. It appears on row hover and on
+   * keyboard focus, and opens a `row-options` menu for that row. Default true.
+   */
+  showRowMenu?: boolean;
+  /**
+   * Items for that menu. Called once per *visible* row during render purely to
+   * decide whether the button is worth showing — return an empty array to leave
+   * a row without one — so keep it cheap and free of side effects.
+   */
+  rowMenuItems?: (row: GanttRow<G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
 }
 
 const INDENT_PX = 14;
@@ -32,14 +45,20 @@ export function GanttRowGutter<T, G>({
   theme,
   width,
   renderRow,
+  showRowMenu = true,
+  rowMenuItems,
 }: GanttRowGutterProps<T, G>): JSX.Element {
-  const { viewport, hoveredRowIndex } = useEngineState(
+  const { viewport, hoveredRowIndex, menuRowIndex } = useEngineState(
     engine,
     (state) => ({
       viewport: state.viewport,
       hoveredRowIndex: state.hoveredRowIndex,
       // Any layout change (data, collapse, metrics) reshapes the row list.
       layoutRevision: state.layoutRevision,
+      // Which row's options menu is open, so its button stays visible and
+      // reports the right `aria-expanded` while the menu is up.
+      menuRowIndex:
+        state.contextMenu?.kind === 'row-options' ? (state.contextMenu.row?.index ?? null) : null,
     }),
     shallowEqual,
   );
@@ -103,6 +122,18 @@ export function GanttRowGutter<T, G>({
               <span className="gantt-gutter__text" title={row.label}>
                 {row.label}
               </span>
+              {/*
+                Only asked of a caller-supplied factory: the built-in items are
+                never empty, so the default path must not pay for a per-row,
+                per-frame call that walks the row's tasks.
+              */}
+              {showRowMenu && (!rowMenuItems || rowMenuItems(row.row, engine).length > 0) ? (
+                <RowMenuButton
+                  engine={engine}
+                  row={row}
+                  open={menuRowIndex === row.row.index}
+                />
+              ) : null}
               {row.row.laneCount > 1 ? (
                 <span className="gantt-gutter__lanes" title={`${row.row.laneCount} lanes`}>
                   {row.row.laneCount}
@@ -113,5 +144,57 @@ export function GanttRowGutter<T, G>({
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * The per-row "more options" button.
+ *
+ * Two details earn it a component of its own. It opens the menu with the
+ * button's own client rect as the anchor, because a click carries no meaningful
+ * plot position the way a right-click does — that rect is what the menu hangs
+ * itself off. And it is marked as a menu opener so the menu's outside-click
+ * handler leaves its own button alone, which is what makes a second click close
+ * the menu rather than close-then-reopen it.
+ */
+function RowMenuButton<T, G>({
+  engine,
+  row,
+  open,
+}: {
+  engine: GanttEngine<T, G>;
+  row: AxisRowDescriptor<G>;
+  open: boolean;
+}): JSX.Element {
+  const toggle = (event: MouseEvent<HTMLButtonElement>): void => {
+    event.stopPropagation();
+    if (open) {
+      engine.contextMenu.close();
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    engine.contextMenu.open({
+      kind: 'row-options',
+      // Plot-space position, like every other opener; the anchor is what the
+      // menu actually positions from.
+      position: { x: 0, y: row.y },
+      row: row.row,
+      anchor: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      className={`gantt-gutter__menu${open ? ' is-open' : ''}`}
+      data-gantt-menu-opener=""
+      aria-label={`More options for ${row.label}`}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onClick={toggle}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <span aria-hidden="true">⋯</span>
+    </button>
   );
 }

@@ -190,6 +190,170 @@ describe('row gutter interaction', () => {
   });
 });
 
+/**
+ * The gutter's per-row "more options" (⋯) button.
+ *
+ * Visibility is CSS (`opacity` under `:hover`), which jsdom does not compute, so
+ * these cover what is behind it: that the button exists per row, that it opens a
+ * `row-options` menu for its own row, that it toggles rather than reopening, and
+ * that its item source is `rowMenuItems` while right-click keeps using
+ * `contextMenuItems`.
+ */
+describe('row options button', () => {
+  const buttons = (container: HTMLElement): HTMLButtonElement[] =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>('.gantt-gutter__menu'));
+
+  const menuLabels = (container: HTMLElement): string[] =>
+    Array.from(container.ownerDocument.querySelectorAll('.gantt-menu__item')).map(
+      (node) => node.textContent ?? '',
+    );
+
+  it('renders one per row, and none when switched off', () => {
+    const { tasks, groups } = fixtureData({ groups: 3 });
+    const harness = mount({ tasks, groups });
+    expect(buttons(harness.container)).toHaveLength(3);
+
+    harness.rerender({ showRowMenu: false });
+    expect(buttons(harness.container)).toHaveLength(0);
+  });
+
+  it('describes itself for assistive tech', () => {
+    const { tasks, groups } = fixtureData({ groups: 1 });
+    const { container } = mount({ tasks, groups });
+
+    const button = buttons(container)[0];
+    expect(button.getAttribute('aria-label')).toBe('More options for Group 0');
+    expect(button.getAttribute('aria-haspopup')).toBe('menu');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens a row-options menu for its own row', () => {
+    const { tasks, groups } = fixtureData({ groups: 3 });
+    const { container, engine } = mount({ tasks, groups });
+
+    dispatch(buttons(container)[1], 'click');
+
+    const state = engine.contextMenu.state;
+    expect(state?.kind).toBe('row-options');
+    expect(state?.row?.group.id).toBe('g1');
+    // Anchored to the button, not to a pointer position.
+    expect(state?.anchor).not.toBeNull();
+    expect(container.ownerDocument.querySelector('.gantt-menu')).not.toBeNull();
+    expect(buttons(container)[1].getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('offers row-scoped defaults', () => {
+    const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 4, nested: true });
+    const { container, engine } = mount({ tasks, groups });
+
+    dispatch(buttons(container)[0], 'click');
+    expect(menuLabels(container)).toEqual(['Collapse group', 'Select 4 tasks', 'Zoom to row']);
+
+    // The row's own tasks, not every task in the chart.
+    const select = Array.from(
+      container.ownerDocument.querySelectorAll<HTMLButtonElement>('.gantt-menu__item'),
+    ).find((node) => node.textContent === 'Select 4 tasks')!;
+    dispatch(select, 'click');
+
+    expect(Array.from(engine.selection.selected).sort()).toEqual(['g0-t0', 'g0-t1', 'g0-t2', 'g0-t3']);
+    expect(container.ownerDocument.querySelector('.gantt-menu')).toBeNull();
+  });
+
+  it('zooms to the row span rather than the whole timeline', () => {
+    const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 2 });
+    // A domain far wider than the data, so "the row's span" and "everything"
+    // are actually different answers — the fixture's rows all span the same
+    // three days, which is the whole domain unless one is given.
+    const { container, engine } = mount({
+      tasks,
+      groups,
+      options: { timeDomain: [new Date(2024, 0, 1).getTime(), new Date(2029, 0, 1).getTime()] },
+    });
+    run(() => engine.viewport.fitTime());
+    const before = engine.viewport.span;
+    expect(before).toBeGreaterThan(365 * DAY);
+
+    dispatch(buttons(container)[0], 'click');
+    const zoom = Array.from(
+      container.ownerDocument.querySelectorAll<HTMLButtonElement>('.gantt-menu__item'),
+    ).find((node) => node.textContent === 'Zoom to row')!;
+    dispatch(zoom, 'click');
+
+    // The row runs T0 → T0 + 3 days, plus the 2% padding either side.
+    expect(engine.viewport.span).toBeLessThan(before);
+    expect(engine.viewport.span / DAY).toBeCloseTo(3 * 1.04, 1);
+    expect(engine.viewport.state.timeStart).toBeLessThanOrEqual(T0);
+  });
+
+  it('takes its items from rowMenuItems, leaving right-click to contextMenuItems', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const { container } = mount({
+      tasks,
+      groups,
+      rowMenuItems: (row) => [{ id: 'rename', label: `Rename ${String(row.group.id)}` }],
+      contextMenuItems: () => [{ id: 'ctx', label: 'From right-click' }],
+    });
+
+    dispatch(buttons(container)[1], 'click');
+    expect(menuLabels(container)).toEqual(['Rename g1']);
+
+    // Escape closes, then a right-click on the same row gets the other source.
+    key(container.ownerDocument, 'Escape');
+    dispatch(container.querySelectorAll('.gantt-gutter__row')[1], 'contextmenu', { button: 2 });
+    expect(menuLabels(container)).toEqual(['From right-click']);
+  });
+
+  it('omits the button for a row whose items are empty', () => {
+    const { tasks, groups } = fixtureData({ groups: 3 });
+    const { container } = mount({
+      tasks,
+      groups,
+      // Only the middle row gets one.
+      rowMenuItems: (row) =>
+        row.group.id === 'g1' ? [{ id: 'only', label: 'Only here' }] : [],
+    });
+
+    expect(buttons(container)).toHaveLength(1);
+    expect(buttons(container)[0].getAttribute('aria-label')).toBe('More options for Group 1');
+  });
+
+  it('closes on a second click instead of reopening', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const { container, engine } = mount({ tasks, groups });
+
+    // The menu's own outside-click handler runs on pointerdown, so a real second
+    // click delivers both events; the button must still end up closed.
+    dispatch(buttons(container)[0], 'click');
+    expect(engine.contextMenu.isOpen).toBe(true);
+
+    dispatch(buttons(container)[0], 'pointerdown');
+    dispatch(buttons(container)[0], 'click');
+    expect(engine.contextMenu.isOpen).toBe(false);
+    expect(container.ownerDocument.querySelector('.gantt-menu')).toBeNull();
+  });
+
+  it('moves the menu to another row when its button is clicked', () => {
+    const { tasks, groups } = fixtureData({ groups: 3 });
+    const { container, engine } = mount({ tasks, groups });
+
+    dispatch(buttons(container)[0], 'click');
+    dispatch(buttons(container)[2], 'pointerdown');
+    dispatch(buttons(container)[2], 'click');
+
+    expect(engine.contextMenu.state?.row?.group.id).toBe('g2');
+    expect(engine.contextMenu.isOpen).toBe(true);
+  });
+
+  it('does not collapse the row it sits in', () => {
+    const { tasks, groups } = fixtureData({ groups: 2, nested: true });
+    const { container, engine } = mount({ tasks, groups });
+
+    // The row handles double-click; the button must not let one through.
+    dispatch(buttons(container)[0], 'dblclick');
+    expect(engine.isCollapsed('g0')).toBe(false);
+  });
+});
+
 describe('items per row', () => {
   it('stacks a row into as many lanes as the fixture asks for', () => {
     const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 6, lanesPerGroup: 3 });

@@ -52,16 +52,41 @@ const undo = () => {
 | `dependencies` | arrow links; installs the dependency plugin for you |
 | `plugins` | your own engine plugins |
 | `tooltip` | custom body, or `false` to disable |
-| `contextMenuItems` | replace the default menu |
+| `contextMenuItems` | replace the default right-click menu |
+| `rowMenuItems` | items for the gutter's per-row ⋯ button; `[]` drops it for that row |
 | `renderRow` | replace gutter row rendering |
 | `headerCorner` | content for the corner above the gutter |
 | `now` | epoch ms for the marker; `null` hides it, omit for the live clock |
 | `renderer` | `'canvas'` (default) or `'svg'` |
 | `engineRef` | the engine, for toolbars, exports and undo |
-| `showHeader` / `showRowGutter` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
+| `showHeader` / `showRowGutter` / `showRowMenu` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
 `onViewportChange`.
+
+## Row options
+
+Each gutter row carries a ⋯ button, revealed when the row is hovered or the button
+is focused, which opens a menu for that row. Left alone it offers collapse/expand,
+select the row's tasks and zoom to the row's own time span. `rowMenuItems` replaces
+that with your own actions:
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  groups={groups}
+  rowMenuItems={(row, engine) => [
+    { id: 'rename', label: 'Rename…', onSelect: () => rename(row.group.id) },
+    { id: 'sep', separator: true },
+    { id: 'zoom', label: 'Zoom to row', onSelect: () => engine.viewport.scrollRowIntoView(row.index) },
+  ]}
+/>
+```
+
+Returning `[]` leaves that row without a button, which is how only some rows get
+one. It is called for every visible row while the gutter renders, so keep it cheap
+— do the work that needs the row's tasks inside `onSelect`, where it runs once per
+click. `showRowMenu={false}` removes the button everywhere.
 
 Pass `tasks`/`groups`/`options` as stable references (`useMemo`) — a new array
 identity means a re-normalize. `options` is compared by value, so an inline

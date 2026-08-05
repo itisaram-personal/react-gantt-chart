@@ -3,6 +3,7 @@ import {
   GanttHistory,
   type GanttEngine,
   type GanttId,
+  type GanttRow,
   type TaskChange,
 } from "@gantt-chart/core";
 import {
@@ -31,7 +32,7 @@ const SNAPS: { label: string; value: number }[] = [
   { label: "1d", value: DAY },
 ];
 /** Tasks generated per row — drives how much there is to stack. */
-const PER_ROW = [100, 200, 500, 1000, 2000];
+const PER_ROW = [25, 50, 100, 200, 500, 1000, 2000];
 /** Engine ceiling on lanes per row; extra tasks pack into the last lane. */
 const MAX_LANES: { label: string; value: number }[] = [
   { label: "1", value: 1 },
@@ -54,7 +55,7 @@ export function App(): JSX.Element {
   const [selection, setSelection] = useState<GanttId[]>([]);
 
   const dataset = useMemo(
-    () => generate({ taskCount, tasksPerProject: tasksPerRow }),
+    () => generate({ taskCount, tasksPerProject: tasksPerRow,withDependencies:false }),
     [taskCount, tasksPerRow],
   );
   const [tasks, setTasks] = useState<DemoTask[]>(dataset.tasks);
@@ -107,6 +108,86 @@ export function App(): JSX.Element {
         },
       });
   }, [colorByStatus]);
+
+  /**
+   * Items for the gutter's ⋯ button — app-specific row actions the library
+   * cannot guess, which is the point of the prop. Passing it replaces the
+   * built-in set (collapse, select, zoom) rather than extending it.
+   *
+   * Note what this does *not* do: no counting, filtering or measuring. The
+   * factory runs for every visible row on every gutter render, so the work that
+   * needs the row's tasks happens inside `onSelect`, where it runs once per
+   * click. `row` itself is free — it already carries depth, lanes and group data.
+   */
+  const rowMenuItems = useCallback(
+    (row: GanttRow<DemoGroupData>, chart: GanttEngine<DemoTaskData, DemoGroupData>) => {
+      const idsInRow = (): GanttId[] =>
+        tasks.filter((task) => task.groupId === row.group.id).map((task) => task.id);
+
+      return [
+        ...(row.hasChildren
+          ? [
+              {
+                id: "toggle",
+                label: row.collapsed ? "Expand group" : "Collapse group",
+                onSelect: () => chart.toggleCollapse(row.group.id),
+              },
+              { id: "sep-1", separator: true },
+            ]
+          : []),
+        {
+          id: "select",
+          label: "Select this row's tasks",
+          onSelect: () => chart.selection.set(idsInRow()),
+        },
+        {
+          id: "zoom",
+          label: "Zoom to this row",
+          onSelect: () => {
+            const own = tasks.filter((task) => task.groupId === row.group.id);
+            if (own.length === 0) return;
+            let start = Infinity;
+            let end = -Infinity;
+            for (const task of own) {
+              if (task.start < start) start = task.start;
+              if (task.end > end) end = task.end;
+            }
+            chart.viewport.setTimeRange(start, end);
+            chart.viewport.scrollRowIntoView(row.index, 8);
+          },
+        },
+        { id: "sep-2", separator: true },
+        {
+          // A data edit, to show the menu reaching past the viewport. Visible
+          // straight away with "Colour by status" on.
+          id: "done",
+          label: "Mark this row done",
+          onSelect: () => {
+            const own = new Set(idsInRow());
+            setTasks((current) =>
+              current.map((task) =>
+                own.has(task.id) && task.data
+                  ? { ...task, data: { ...task.data, status: "done" as const, progress: 1 } }
+                  : task,
+              ),
+            );
+          },
+        },
+        {
+          id: "log",
+          label: `Log row (${row.laneCount} ${row.laneCount === 1 ? "lane" : "lanes"})`,
+          onSelect: () =>
+            console.log("[demo] row", row.group.id, {
+              label: row.group.label,
+              kind: row.group.data?.kind,
+              depth: row.depth,
+              lanes: row.laneCount,
+            }),
+        },
+      ];
+    },
+    [tasks],
+  );
 
   const applyAndRecord = useCallback(
     (next: DemoTask[], changes: TaskChange[]) => {
@@ -260,6 +341,7 @@ export function App(): JSX.Element {
           dependencies={showDependencies ? dataset.dependencies : undefined}
           onTasksChange={applyAndRecord}
           onSelectionChange={setSelection}
+          rowMenuItems={rowMenuItems}
           engineRef={setEngine}
           headerCorner={
             <span>{dataset.groups.length.toLocaleString()} rows</span>
@@ -286,7 +368,8 @@ export function App(): JSX.Element {
         ) : null}
         <span className="app__hint">
           drag bars · drag edges to resize · marquee on empty space · wheel
-          scrolls · ctrl+wheel zooms · right-click for menu
+          scrolls · ctrl+wheel zooms · right-click for menu · hover a row label
+          for ⋯
         </span>
       </footer>
     </div>

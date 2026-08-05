@@ -60,11 +60,26 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   plugins?: readonly GanttPlugin<T, G>[];
 
   contextMenuItems?: (state: ContextMenuState<T, G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
+  /**
+   * Items for the row gutter's "more options" (⋯) button, which appears on a
+   * row when it is hovered or the button is focused.
+   *
+   * Separate from `contextMenuItems`, so the button and a right-click can offer
+   * different things. Returning an empty array leaves that row without a button
+   * at all, which is how a subset of rows gets one. Called once per visible row
+   * while rendering the gutter, so keep it cheap and side-effect free.
+   *
+   * Omit it for a row-scoped default set: collapse/expand, select the row's
+   * tasks, zoom to the row's time span.
+   */
+  rowMenuItems?: (row: GanttRow<G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
   /** Custom tooltip body; `false` disables the tooltip. */
   tooltip?: ((context: GanttTooltipContext<T, G>) => ReactNode | null) | false;
 
   showHeader?: boolean;
   showRowGutter?: boolean;
+  /** The gutter's per-row "more options" button. On by default. */
+  showRowMenu?: boolean;
   showScrollbar?: boolean;
   showGrid?: boolean;
   showRowBands?: boolean;
@@ -125,6 +140,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     height = '100%',
     showHeader = true,
     showRowGutter = true,
+    showRowMenu = true,
     showScrollbar = true,
     showGrid,
     showRowBands,
@@ -248,6 +264,8 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             theme={theme}
             width={gutterWidth}
             renderRow={props.renderRow}
+            showRowMenu={showRowMenu}
+            rowMenuItems={props.rowMenuItems}
           />
         ) : null}
 
@@ -297,7 +315,12 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
         </div>
       ) : null}
 
-      <GanttContextMenu engine={engine} theme={theme} items={props.contextMenuItems} />
+      <GanttContextMenu
+        engine={engine}
+        theme={theme}
+        items={props.contextMenuItems}
+        rowItems={props.rowMenuItems}
+      />
     </div>
   );
 }

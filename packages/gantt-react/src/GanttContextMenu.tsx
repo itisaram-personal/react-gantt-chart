@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { ContextMenuState, GanttEngine, GanttTheme } from '@gantt-chart/core';
+import type { ContextMenuState, GanttEngine, GanttRow, GanttTheme, Point } from '@gantt-chart/core';
 import { useEngineState } from './useEngineState';
 
 export interface GanttMenuItem {
@@ -15,6 +15,13 @@ export interface GanttContextMenuProps<T, G> {
   theme: GanttTheme;
   /** Replace the default items. Return an empty array to suppress the menu. */
   items?: (state: ContextMenuState<T, G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
+  /**
+   * Items for a `row-options` menu — the one the row gutter's "more options"
+   * button opens. Kept separate from {@link items} so a row's own actions need
+   * not be teased back out of a general context-menu state, and so the button
+   * and a right-click can offer different things.
+   */
+  rowItems?: (row: GanttRow<G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
 }
 
 /**
@@ -28,6 +35,7 @@ export function GanttContextMenu<T, G>({
   engine,
   theme,
   items,
+  rowItems,
 }: GanttContextMenuProps<T, G>): JSX.Element | null {
   const menu = useEngineState(engine, (state) => state.contextMenu);
   const ref = useRef<HTMLDivElement>(null);
@@ -52,6 +60,12 @@ export function GanttContextMenu<T, G>({
     if (!menu) return;
     const close = (event: Event): void => {
       if (ref.current && event.target instanceof Node && ref.current.contains(event.target)) return;
+      /*
+       * A press on the control that opens a menu is that control's business.
+       * Closing here would beat its click handler to it, so a second click on
+       * the same button would close and immediately reopen instead of toggling.
+       */
+      if (event.target instanceof Element && event.target.closest('[data-gantt-menu-opener]')) return;
       engine.contextMenu.close();
     };
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -73,19 +87,15 @@ export function GanttContextMenu<T, G>({
 
   if (!menu) return null;
 
-  const entries = items ? items(menu, engine) : defaultItems(menu, engine);
+  const entries =
+    menu.kind === 'row-options' && menu.row
+      ? (rowItems ?? defaultRowItems)(menu.row, engine)
+      : items
+        ? items(menu, engine)
+        : defaultItems(menu, engine);
   if (entries.length === 0) return null;
 
-  // Keep the menu on screen without measuring it: these are its max dimensions.
-  const estimated = { width: 200, height: 44 + entries.length * 30 };
-  const left =
-    typeof window === 'undefined'
-      ? point.current.x
-      : Math.max(4, Math.min(point.current.x, window.innerWidth - estimated.width - 4));
-  const top =
-    typeof window === 'undefined'
-      ? point.current.y
-      : Math.max(4, Math.min(point.current.y, window.innerHeight - estimated.height - 4));
+  const { left, top } = place(menu, point.current, entries.length);
 
   return (
     <div
@@ -122,6 +132,38 @@ export function GanttContextMenu<T, G>({
       )}
     </div>
   );
+}
+
+/**
+ * Where to draw the menu, in client pixels.
+ *
+ * Two openers, two rules. A right-click has a pointer position and the menu
+ * hangs off it, top-left first. A button has a box instead: the menu drops below
+ * it, right-aligned so it grows back over the gutter rather than out across the
+ * plot, and flips above when the bottom of the window is closer than its own
+ * height. Either way the result is clamped into view, without measuring — these
+ * are the menu's maximum dimensions.
+ */
+function place(
+  menu: ContextMenuState<unknown, unknown>,
+  point: Point,
+  itemCount: number,
+): { left: number; top: number } {
+  const estimated = { width: 200, height: 44 + itemCount * 30 };
+  const anchor = menu.anchor;
+  const room = typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight };
+
+  let left = anchor ? anchor.x + anchor.width - estimated.width : point.x;
+  let top = anchor ? anchor.y + anchor.height + 2 : point.y;
+
+  if (anchor && room && top + estimated.height > room.height - 4) {
+    top = anchor.y - estimated.height - 2;
+  }
+  if (room) {
+    left = Math.max(4, Math.min(left, room.width - estimated.width - 4));
+    top = Math.max(4, Math.min(top, room.height - estimated.height - 4));
+  }
+  return { left, top };
 }
 
 /** A useful default set, derived from what the menu was opened on. */
@@ -165,4 +207,75 @@ function defaultItems<T, G>(
   );
 
   return items;
+}
+
+/**
+ * Defaults for the row gutter's "more options" button.
+ *
+ * Everything here is scoped to the one row the button belongs to — the global
+ * actions stay on the right-click menu. `Zoom to row` reads the row's own time
+ * span rather than calling `fitTime`, which would frame the whole dataset.
+ */
+function defaultRowItems<T, G>(row: GanttRow<G>, engine: GanttEngine<T, G>): GanttMenuItem[] {
+  const items: GanttMenuItem[] = [];
+
+  if (row.hasChildren) {
+    items.push({
+      id: 'toggle-row',
+      label: row.collapsed ? 'Expand group' : 'Collapse group',
+      onSelect: () => engine.toggleCollapse(row.group.id),
+    });
+  }
+
+  const tasks = engine.getTasks();
+  const indices = taskIndicesInRow(engine, row);
+  const empty = indices.length === 0;
+
+  items.push(
+    {
+      id: 'select-row',
+      label: empty ? 'Select tasks in row' : `Select ${indices.length} task${indices.length === 1 ? '' : 's'}`,
+      disabled: empty,
+      onSelect: () => engine.selection.set(indices.map((index) => tasks[index].id)),
+    },
+    {
+      id: 'zoom-row',
+      label: 'Zoom to row',
+      disabled: empty,
+      onSelect: () => {
+        let start = Infinity;
+        let end = -Infinity;
+        for (const index of indices) {
+          const task = tasks[index];
+          if (task.start < start) start = task.start;
+          if (task.end > end) end = task.end;
+        }
+        if (start > end) return;
+        // A hair of padding, so the outermost bars are not flush to the edges.
+        const pad = (end - start) * 0.02;
+        engine.viewport.setTimeRange(start - pad, end + pad);
+      },
+    },
+  );
+
+  return items;
+}
+
+/**
+ * Task indices displayed on a row.
+ *
+ * Read from the layout's CSR slice rather than by filtering every task, so the
+ * cost is the size of the row and not the size of the dataset.
+ */
+function taskIndicesInRow<T, G>(engine: GanttEngine<T, G>, row: GanttRow<G>): number[] {
+  const layout = engine.getLayout();
+  // The row is a snapshot from open time; a data change since then can leave its
+  // index pointing past the end of the current layout.
+  if (row.index < 0 || row.index >= layout.rows.length) return [];
+
+  const out: number[] = [];
+  for (let rank = layout.rowOffsets[row.index]; rank < layout.rowOffsets[row.index + 1]; rank++) {
+    out.push(layout.rankToTask[rank]);
+  }
+  return out;
 }
