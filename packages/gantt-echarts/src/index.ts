@@ -31,11 +31,15 @@ export {
   floorTo,
   formatTime,
   isoWeek,
+  labelZoomAction,
+  labelZoomRung,
   parentUnit,
   unitLength,
 } from './timeScale';
 export type {
   FormatOptions,
+  LabelZoomAction,
+  LabelZoomInput,
   TimeBand,
   TimeBandInput,
   TimeHeaderModel,
@@ -43,6 +47,7 @@ export type {
   TimeTick,
   TimeTickScale,
   TimeUnit,
+  ZoomRung,
 } from './timeScale';
 
 export { dependenciesPlugin } from './plugins/dependencies';

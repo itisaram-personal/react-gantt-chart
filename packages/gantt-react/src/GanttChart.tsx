@@ -79,6 +79,15 @@ export interface GanttChartProps<T = unknown, G = unknown> {
    * scale row height so the selected rows fill the plot. Off by default.
    */
   showRowZoomBar?: boolean;
+  /**
+   * Clicking a time-header label zooms to the period it names, ctrl/cmd-click
+   * zooms back out. The granularity follows what is on screen: a multi-year view
+   * zooms to a year, under a year to a quarter, under three months to a month,
+   * under a month to a week, and under a week to a day.
+   *
+   * On by default. Pass `false` for a header that is only a scale.
+   */
+  interactiveLabels?: boolean;
   /** Overrides the theme's `axisWidth`. */
   gutterWidth?: number;
   headerCorner?: ReactNode;
@@ -121,6 +130,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     showRowBands,
     showTimeZoomBar = false,
     showRowZoomBar = false,
+    interactiveLabels = true,
     now,
     locale,
     weekStartsOn,
@@ -220,7 +230,13 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             </div>
           ) : null}
           <div className="gantt__header-scale">
-            <GanttTimeHeader engine={engine} theme={theme} locale={locale} weekStartsOn={weekStartsOn} />
+            <GanttTimeHeader
+              engine={engine}
+              theme={theme}
+              locale={locale}
+              weekStartsOn={weekStartsOn}
+              interactiveLabels={interactiveLabels}
+            />
           </div>
         </div>
       ) : null}

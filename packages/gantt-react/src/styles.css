@@ -120,6 +120,69 @@
   color: var(--gantt-text);
 }
 
+/* ------------------------------------------------ interactive header labels */
+
+/*
+ * Labels rendered as <button> to zoom the viewport.
+ *
+ * `pointer-events: auto` is what makes this work at all — the tick rule above
+ * disables them so a non-interactive header cannot steal clicks meant for the
+ * plot. The button reset is here rather than on the shared classes so a
+ * read-only header keeps its plain <div> rendering untouched.
+ */
+.gantt-header__band.is-interactive,
+.gantt-header__tick.is-interactive {
+  pointer-events: auto;
+  margin: 0;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: zoom-in;
+  /* Only the label text is a click target; the rest of the strip is not. */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.gantt-header__band.is-interactive {
+  /* Re-stated: the button reset above cleared the shared rule's left border. */
+  border-left: 1px solid var(--gantt-grid-line-strong);
+  color: var(--gantt-text);
+  font-weight: 600;
+  font-size: var(--gantt-label-size);
+}
+
+.gantt-header__band.is-interactive:first-child {
+  border-left: none;
+}
+
+.gantt-header__tick.is-interactive {
+  border-left: 1px solid var(--gantt-grid-line);
+  color: var(--gantt-text-muted);
+  font-size: var(--gantt-label-size);
+}
+
+.gantt-header__tick.is-interactive.is-major {
+  border-left-color: var(--gantt-grid-line-strong);
+  color: var(--gantt-text);
+}
+
+.gantt-header__band.is-interactive:hover,
+.gantt-header__tick.is-interactive:hover {
+  background: var(--gantt-row-hover);
+  color: var(--gantt-accent);
+}
+
+/* Keyboard users get the same affordance the mouse does. */
+.gantt-header__band.is-interactive:focus-visible,
+.gantt-header__tick.is-interactive:focus-visible {
+  outline: 2px solid var(--gantt-accent);
+  outline-offset: -2px;
+}
+
 /* ------------------------------------------------------------------ body */
 
 .gantt__body {

@@ -590,3 +590,186 @@ describe('zoom bars', () => {
 function countLinks(html: string): number {
   return (html.match(new RegExp(lightTheme.colors.dependencyLine, 'g')) ?? []).length;
 }
+
+/**
+ * Clicking a header label to zoom.
+ *
+ * These go through the mounted component rather than the pure ladder (covered in
+ * the echarts package), so the wiring is what is under test: that labels are
+ * real buttons, that a click reaches the engine, and that ctrl reverses it.
+ *
+ * Every case needing a wide view passes an explicit `timeDomain`. `setTimeRange`
+ * clamps the span to the domain and the fixture's data spans only about eight
+ * days — without it the viewport silently stays a week wide and the ladder never
+ * leaves its bottom rung.
+ */
+describe('interactive header labels', () => {
+  const DOMAIN_START = new Date(2024, 0, 1).getTime();
+  const DOMAIN_END = new Date(2029, 0, 1).getTime();
+  const wide = { options: { timeDomain: [DOMAIN_START, DOMAIN_END] as [number, number] } };
+
+  type Viewport = { viewport: { setTimeRange(a: number, b: number): void } };
+
+  /** Three calendar years on screen, which puts the ladder on its top rung. */
+  function overYears(engine: Viewport): void {
+    run(() =>
+      engine.viewport.setTimeRange(new Date(2025, 0, 1).getTime(), new Date(2028, 0, 1).getTime()),
+    );
+  }
+
+  /** Ten days on screen — a week-level view, whose rung above is the month. */
+  function overDays(engine: Viewport): void {
+    run(() => engine.viewport.setTimeRange(T0, T0 + 10 * DAY));
+  }
+
+  function labels(container: HTMLElement, selector: string): HTMLButtonElement[] {
+    return Array.from(container.querySelectorAll<HTMLButtonElement>(selector));
+  }
+
+  it('renders labels as buttons by default', () => {
+    const { tasks, groups } = fixtureData();
+    const { container } = mount({ tasks, groups, locale: 'en-US' });
+
+    const bands = labels(container, '.gantt-header__band');
+    const ticks = labels(container, '.gantt-header__tick');
+    expect(bands.length).toBeGreaterThan(0);
+    expect(ticks.length).toBeGreaterThan(0);
+    // Buttons, not divs: keyboard and screen-reader users get the gesture too.
+    for (const node of [...bands, ...ticks]) {
+      expect(node.tagName).toBe('BUTTON');
+      expect(node.getAttribute('type')).toBe('button');
+      expect(node.className).toContain('is-interactive');
+    }
+  });
+
+  it('renders plain, inert labels when switched off', () => {
+    const { tasks, groups } = fixtureData();
+    const { container } = mount({ tasks, groups, interactiveLabels: false });
+
+    expect(container.querySelectorAll('.gantt-header__band button')).toHaveLength(0);
+    expect(container.querySelector('.gantt-header__band')?.tagName).toBe('DIV');
+    expect(container.querySelector('.gantt-header__tick')?.tagName).toBe('DIV');
+    expect(container.querySelector('.gantt-header__band')?.className).not.toContain('is-interactive');
+  });
+
+  it('zooms to one year when several are visible', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overYears(engine);
+
+    const before = engine.viewport.span;
+    const bands = labels(container, '.gantt-header__band');
+    expect(bands.length).toBeGreaterThan(1); // several year bands are on screen
+    dispatch(bands[1], 'click');
+
+    const { timeStart, timeEnd } = engine.viewport.state;
+    expect(engine.viewport.span).toBeLessThan(before);
+    // Exactly one calendar year, landing on 1 January.
+    expect(new Date(timeStart).getMonth()).toBe(0);
+    expect(new Date(timeStart).getDate()).toBe(1);
+    expect(new Date(timeEnd).getFullYear()).toBe(new Date(timeStart).getFullYear() + 1);
+  });
+
+  it('steps down the ladder on successive clicks', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overYears(engine);
+
+    const spans: number[] = [engine.viewport.span];
+    for (let i = 0; i < 4; i++) {
+      const band = labels(container, '.gantt-header__band')[0];
+      if (!band) break;
+      dispatch(band, 'click');
+      spans.push(engine.viewport.span);
+    }
+
+    // year -> quarter -> month -> week -> day, each strictly narrower.
+    for (let i = 1; i < spans.length; i++) {
+      expect(spans[i]).toBeLessThan(spans[i - 1]);
+    }
+    expect(spans).toHaveLength(5);
+  });
+
+  it('widens again on ctrl-click', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overDays(engine);
+
+    const before = engine.viewport.span;
+    dispatch(labels(container, '.gantt-header__tick')[0], 'click', { ctrlKey: true });
+
+    expect(engine.viewport.span).toBeGreaterThan(before);
+    // The month containing the click, so it opens on the 1st.
+    expect(new Date(engine.viewport.state.timeStart).getDate()).toBe(1);
+  });
+
+  it('treats cmd-click as ctrl-click', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overDays(engine);
+
+    const before = engine.viewport.span;
+    dispatch(labels(container, '.gantt-header__tick')[0], 'click', { metaKey: true });
+    expect(engine.viewport.span).toBeGreaterThan(before);
+  });
+
+  it('zooms from a tick label as well as a band', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overYears(engine);
+
+    const before = engine.viewport.span;
+    dispatch(labels(container, '.gantt-header__tick')[1], 'click');
+    expect(engine.viewport.span).toBeLessThan(before);
+  });
+
+  it('leaves the viewport alone when labels are inert', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, interactiveLabels: false, ...wide });
+    overYears(engine);
+
+    const before = { ...engine.viewport.state };
+    const band = container.querySelector('.gantt-header__band');
+    if (band) dispatch(band, 'click');
+
+    expect(engine.viewport.state.timeStart).toBe(before.timeStart);
+    expect(engine.viewport.state.timeEnd).toBe(before.timeEnd);
+  });
+
+  it('names the gesture in the tooltip so it is discoverable', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overYears(engine);
+
+    const title = labels(container, '.gantt-header__band')[0].getAttribute('title') ?? '';
+    expect(title).toContain('zoom to year');
+    expect(title).toContain('ctrl-click');
+  });
+
+  it('reports the current rung, not a fixed one, in the tooltip', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overDays(engine);
+
+    const title = labels(container, '.gantt-header__tick')[0].getAttribute('title') ?? '';
+    expect(title).toContain('zoom to week');
+  });
+
+  it('stays within the engine domain', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', ...wide });
+    overYears(engine);
+
+    // Repeated ctrl-clicks run off the top of the ladder into a domain fit;
+    // clamping stays the engine's job and must still hold.
+    for (let i = 0; i < 4; i++) {
+      const band = labels(container, '.gantt-header__band')[0];
+      if (!band) break;
+      dispatch(band, 'click', { ctrlKey: true });
+    }
+
+    expect(engine.viewport.state.timeStart).toBeGreaterThanOrEqual(DOMAIN_START);
+    expect(engine.viewport.state.timeEnd).toBeLessThanOrEqual(DOMAIN_END);
+  });
+});
+

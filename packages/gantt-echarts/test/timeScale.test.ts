@@ -8,6 +8,8 @@ import {
   floorTo,
   formatTime,
   isoWeek,
+  labelZoomAction,
+  labelZoomRung,
   parentUnit,
   unitLength,
   type TimeUnit,
@@ -295,5 +297,225 @@ describe('formatTime', () => {
     // 2027-01-01 is a Friday: still week 53 of 2026.
     expect(isoWeek(new Date(2027, 0, 1).getTime())).toBe(53);
     expect(formatTime(new Date(2026, 0, 5).getTime(), 'week')).toBe('W2');
+  });
+});
+
+/**
+ * Clicking a header label. The ladder is year → quarter → month → week → day,
+ * and every case below states the *visible span* first, because that — not the
+ * unit of the label clicked — is what picks the rung.
+ */
+describe('labelZoomRung', () => {
+  const DAYS = (n: number) => n * 86_400_000;
+
+  it('reads a multi-year view as year', () => {
+    expect(labelZoomRung(DAYS(365 * 5))).toBe('year');
+    expect(labelZoomRung(DAYS(400))).toBe('year');
+  });
+
+  it('reads under a year as quarter', () => {
+    expect(labelZoomRung(DAYS(300))).toBe('quarter');
+    expect(labelZoomRung(DAYS(100))).toBe('quarter');
+    // Nominal thresholds: 365 days is just under YEAR (365.2425 days).
+    expect(labelZoomRung(DAYS(365))).toBe('quarter');
+  });
+
+  it('reads under three months as month', () => {
+    expect(labelZoomRung(DAYS(80))).toBe('month');
+    expect(labelZoomRung(DAYS(31))).toBe('month');
+  });
+
+  it('reads under a month as week', () => {
+    expect(labelZoomRung(DAYS(20))).toBe('week');
+    expect(labelZoomRung(DAYS(7))).toBe('week');
+  });
+
+  it('floors at day so a narrow view cannot zoom out on a click', () => {
+    // Mapping a 3-day window to `week` would widen it — the opposite gesture.
+    expect(labelZoomRung(DAYS(3))).toBe('day');
+    expect(labelZoomRung(DAYS(0.5))).toBe('day');
+  });
+});
+
+describe('labelZoomAction', () => {
+  const at = (y: number, m = 0, d = 1) => new Date(y, m, d).getTime();
+
+  it('zooms a multi-year view to the clicked year', () => {
+    const action = labelZoomAction({
+      timeStart: at(2024),
+      timeEnd: at(2029),
+      time: at(2026, 4, 17),
+      direction: 'in',
+    });
+    expect(action).toEqual({ kind: 'range', start: at(2026), end: at(2027), unit: 'year' });
+  });
+
+  it('zooms an under-a-year view to the quarter containing the click', () => {
+    // Clicking "Mar" yields Q1, not March: the span picks the granularity and
+    // the label only locates the period.
+    const action = labelZoomAction({
+      timeStart: at(2026, 0, 1),
+      timeEnd: at(2026, 7, 1),
+      time: at(2026, 2, 1),
+      direction: 'in',
+    });
+    expect(action).toEqual({ kind: 'range', start: at(2026, 0), end: at(2026, 3), unit: 'quarter' });
+  });
+
+  it('zooms an under-three-months view to the clicked month', () => {
+    const action = labelZoomAction({
+      timeStart: at(2026, 0, 1),
+      timeEnd: at(2026, 1, 20),
+      time: at(2026, 1, 12),
+      direction: 'in',
+    });
+    expect(action).toEqual({ kind: 'range', start: at(2026, 1), end: at(2026, 2), unit: 'month' });
+  });
+
+  it('zooms an under-a-month view to the clicked week', () => {
+    const action = labelZoomAction({
+      timeStart: at(2026, 2, 1),
+      timeEnd: at(2026, 2, 21),
+      time: at(2026, 2, 11), // a Wednesday
+      direction: 'in',
+      weekStartsOn: 1,
+    });
+    // Monday-start week containing 11 March 2026 opens on the 9th.
+    expect(action).toEqual({ kind: 'range', start: at(2026, 2, 9), end: at(2026, 2, 16), unit: 'week' });
+  });
+
+  it('honours weekStartsOn when landing on a week', () => {
+    const input = {
+      timeStart: at(2026, 2, 1),
+      timeEnd: at(2026, 2, 21),
+      time: at(2026, 2, 11),
+      direction: 'in' as const,
+    };
+    expect(labelZoomAction({ ...input, weekStartsOn: 0 })).toMatchObject({ start: at(2026, 2, 8) });
+    expect(labelZoomAction({ ...input, weekStartsOn: 1 })).toMatchObject({ start: at(2026, 2, 9) });
+  });
+
+  it('always narrows the view on a plain click', () => {
+    const spans = [5, 1, 0.8, 0.25, 0.08, 0.02].map((years) => years * 365.2425 * 86_400_000);
+    for (const span of spans) {
+      const timeStart = at(2026, 3, 12);
+      const action = labelZoomAction({
+        timeStart,
+        timeEnd: timeStart + span,
+        time: timeStart + span / 2,
+        direction: 'in',
+      });
+      if (!action || action.kind !== 'range') throw new Error('expected a range');
+      expect(action.end - action.start).toBeLessThan(span);
+    }
+  });
+
+  /* ------------------------------------------------------- ctrl-click: out */
+
+  it('steps one rung coarser on a zoom out', () => {
+    const out = (timeStart: number, timeEnd: number) =>
+      labelZoomAction({ timeStart, timeEnd, time: at(2026, 4, 17), direction: 'out' });
+
+    // week-level view → the containing month
+    expect(out(at(2026, 4, 1), at(2026, 4, 20))).toMatchObject({ unit: 'month' });
+    // month-level → quarter
+    expect(out(at(2026, 4, 1), at(2026, 5, 20))).toMatchObject({ unit: 'quarter' });
+    // quarter-level → year
+    expect(out(at(2026, 0, 1), at(2026, 8, 1))).toMatchObject({ unit: 'year' });
+    // day-level → week
+    expect(out(at(2026, 4, 16), at(2026, 4, 19))).toMatchObject({ unit: 'week' });
+  });
+
+  it('widens to the whole domain once the ladder runs out', () => {
+    // Already at `year`, so there is no coarser period to land on.
+    const action = labelZoomAction({
+      timeStart: at(2024),
+      timeEnd: at(2029),
+      time: at(2026),
+      direction: 'out',
+    });
+    expect(action).toEqual({ kind: 'fit' });
+  });
+
+  it('always widens the view on a ctrl-click', () => {
+    const spans = [0.02, 0.08, 0.25, 0.8].map((years) => years * 365.2425 * 86_400_000);
+    for (const span of spans) {
+      const timeStart = at(2026, 3, 12);
+      const action = labelZoomAction({
+        timeStart,
+        timeEnd: timeStart + span,
+        time: timeStart + span / 2,
+        direction: 'out',
+      });
+      if (!action || action.kind !== 'range') throw new Error('expected a range');
+      expect(action.end - action.start).toBeGreaterThan(span);
+    }
+  });
+
+  /*
+   * Nominal thresholds vs real calendar lengths. Each window below is *exactly*
+   * one period long, so the rung it maps to would zoom to the period already
+   * framed and move nothing. A click that does nothing reads as broken, so the
+   * action has to step past it.
+   */
+  it('does not stall on a 31-day month', () => {
+    // January is 31 days, above the 30.44-day MONTH threshold, so it reads as
+    // `month` — the very month already on screen.
+    const action = labelZoomAction({
+      timeStart: at(2026, 0, 1),
+      timeEnd: at(2026, 1, 1),
+      time: at(2026, 0, 15),
+      direction: 'in',
+    });
+    expect(action).toMatchObject({ kind: 'range', unit: 'week' });
+    if (!action || action.kind !== 'range') throw new Error('expected a range');
+    expect(action.end - action.start).toBeLessThan(at(2026, 1, 1) - at(2026, 0, 1));
+  });
+
+  it('does not stall on a 92-day quarter', () => {
+    // Q3 2026 is 92 days, above the 91.31-day threshold for `quarter`.
+    const action = labelZoomAction({
+      timeStart: at(2026, 6, 1),
+      timeEnd: at(2026, 9, 1),
+      time: at(2026, 7, 15),
+      direction: 'in',
+    });
+    expect(action).toMatchObject({ kind: 'range', unit: 'month' });
+  });
+
+  it('does not stall on a 366-day leap year', () => {
+    const action = labelZoomAction({
+      timeStart: at(2028, 0, 1),
+      timeEnd: at(2029, 0, 1),
+      time: at(2028, 5, 15),
+      direction: 'in',
+    });
+    expect(action).toMatchObject({ kind: 'range', unit: 'quarter' });
+  });
+
+  it('does not stall zooming out of an exact period either', () => {
+    // One whole month framed: the month rung cannot widen it.
+    const action = labelZoomAction({
+      timeStart: at(2026, 0, 1),
+      timeEnd: at(2026, 1, 1),
+      time: at(2026, 0, 15),
+      direction: 'out',
+    });
+    expect(action).toMatchObject({ kind: 'range', unit: 'quarter' });
+  });
+
+  it('offers nothing finer than a day', () => {
+    const start = at(2026, 2, 11);
+    expect(
+      labelZoomAction({ timeStart: start, timeEnd: start + 6 * 3_600_000, time: start, direction: 'in' }),
+    ).toBeNull();
+  });
+
+  it('refuses a degenerate window rather than guessing', () => {
+    const base = { time: at(2026), direction: 'in' as const };
+    expect(labelZoomAction({ ...base, timeStart: at(2026), timeEnd: at(2026) })).toBeNull();
+    expect(labelZoomAction({ ...base, timeStart: at(2027), timeEnd: at(2026) })).toBeNull();
+    expect(labelZoomAction({ ...base, timeStart: 0, timeEnd: Number.NaN })).toBeNull();
+    expect(labelZoomAction({ timeStart: at(2024), timeEnd: at(2029), time: Number.NaN, direction: 'in' })).toBeNull();
   });
 });
