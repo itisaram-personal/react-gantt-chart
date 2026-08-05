@@ -1,8 +1,18 @@
 {
   "name": "@gantt-chart/core",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Framework-agnostic Gantt engine: layout, stacking, virtualization, selection, drag, state.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itisaram-personal/react-gantt-chart.git",
+    "directory": "packages/gantt-core"
+  },
+  "homepage": "https://github.com/itisaram-personal/react-gantt-chart#readme",
+  "bugs": "https://github.com/itisaram-personal/react-gantt-chart/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
