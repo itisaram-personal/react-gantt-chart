@@ -1,0 +1,70 @@
+name: Release
+
+# Publishes @gantt-chart/* to npm via trusted publishing (OIDC) — no npm token.
+# Each package must have this workflow registered as its trusted publisher at
+# https://www.npmjs.com/package/<name>/access
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token npm exchanges for a publish grant
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_PROVENANCE: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          # No NODE_AUTH_TOKEN: auth comes from OIDC at publish time.
+          # No `cache:` either — release builds should not restore a cache.
+
+      # Trusted publishing needs npm >= 11.5.1; don't rely on what Node bundles.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Check versions agree
+        run: |
+          expected=$(node -p "require('./packages/gantt-core/package.json').version")
+          for pkg in themes echarts react; do
+            actual=$(node -p "require('./packages/gantt-$pkg/package.json').version")
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::@gantt-chart/$pkg is $actual but core is $expected"
+              exit 1
+            fi
+          done
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$expected" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $expected"
+            exit 1
+          fi
+          echo "Releasing $expected"
+
+      # Dependency order: core -> themes -> echarts -> react.
+      # Already-published versions are skipped so a re-run after a partial
+      # failure resumes instead of erroring on E403 version-exists.
+      - name: Publish
+        run: |
+          for pkg in core themes echarts react; do
+            name="@gantt-chart/$pkg"
+            version=$(node -p "require('./packages/gantt-$pkg/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published — skipping"
+            else
+              echo "Publishing $name@$version"
+              npm publish -w "$name"
+            fi
+          done
