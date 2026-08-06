@@ -58,13 +58,28 @@ jobs:
       # failure resumes instead of erroring on E403 version-exists.
       - name: Publish
         run: |
+          # Default shell is `bash -e` without pipefail; `tee` below would
+          # otherwise swallow a non-zero exit from npm publish.
+          set -o pipefail
           for pkg in core themes echarts react; do
             name="@gantt-chart/$pkg"
             version=$(node -p "require('./packages/gantt-$pkg/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version already published — skipping"
-            else
-              echo "Publishing $name@$version"
-              npm publish -w "$name"
+              continue
+            fi
+            echo "Publishing $name@$version"
+            # Publish from inside the package rather than with `-w`: the OIDC
+            # token npm mints is scoped to the package in the working directory.
+            if ! (cd "packages/gantt-$pkg" && npm publish 2>&1 | tee /tmp/publish.log); then
+              # Surface the reason in the job summary — run logs need auth to read.
+              {
+                echo "### Publish failed: \`$name@$version\`"
+                echo
+                echo '```'
+                tail -n 40 /tmp/publish.log
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
           done
