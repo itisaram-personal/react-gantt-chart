@@ -127,7 +127,10 @@ export interface VirtualizationOptions {
   maxVisibleItems: number;
 }
 
-export type WheelAction = 'scroll' | 'zoom' | 'pan' | 'none';
+export type WheelAction = "scroll" | "zoom" | "pan" | "none";
+
+/** What a left-button drag starting on empty plot background does. */
+export type BackgroundDragAction = "marquee" | "pan" | "none";
 
 export interface InteractionOptions {
   selection: boolean;
@@ -138,8 +141,28 @@ export interface InteractionOptions {
   resize: boolean;
   /** Snap dragged/resized times to this many ms. 0 disables snapping. */
   snapMs: number;
-  /** Rubber-band (marquee) selection on empty background drag. */
+  /**
+   * Master switch for rubber-band (marquee) selection. When false, any
+   * {@link backgroundDrag} entry resolving to `'marquee'` falls back to `'pan'`.
+   */
   marquee: boolean;
+  /**
+   * Gesture for a left-button drag on empty background, keyed by modifier.
+   *
+   * Resolved with the same precedence as {@link InteractionOptions.wheel}:
+   * ctrl/meta, then shift, then alt, then plain. Swap `plain` and `shift` for
+   * the drag-to-pan behaviour most map and design tools use.
+   *
+   * Note that ctrl/meta and alt still pick the marquee *mode* (add / remove)
+   * when they resolve to `'marquee'`, so overriding them to `'pan'` also gives
+   * up additive marquee selection.
+   */
+  backgroundDrag: {
+    plain: BackgroundDragAction;
+    ctrl: BackgroundDragAction;
+    shift: BackgroundDragAction;
+    alt: BackgroundDragAction;
+  };
   wheel: {
     plain: WheelAction;
     ctrl: WheelAction;
@@ -188,11 +211,11 @@ export interface ViewportState {
 
 export type DragMode =
   /** Selection spans several rows: x-axis movement only. */
-  | 'horizontal'
+  | "horizontal"
   /** Selection is confined to one row: free x/y movement. */
-  | 'free'
-  | 'resize-start'
-  | 'resize-end';
+  | "free"
+  | "resize-start"
+  | "resize-end";
 
 export interface DragState {
   mode: DragMode;
@@ -228,7 +251,7 @@ export interface TaskChange {
  * control (the row gutter's "more options" button) rather than a right-click, so
  * a view layer may draw it differently and fill it from a different item source.
  */
-export type ContextMenuTargetKind = 'task' | 'row' | 'axis' | 'row-options' | 'background';
+export type ContextMenuTargetKind = "task" | "row" | "axis" | "row-options" | "background";
 
 export interface ContextMenuState<T = unknown, G = unknown> {
   kind: ContextMenuTargetKind;
@@ -315,22 +338,26 @@ export interface PointerModifiers {
 }
 
 export interface GanttEventMap<T = unknown, G = unknown> {
-  'data:change': { taskCount: number; groupCount: number };
-  'layout:change': LayoutResult<G>;
-  'viewport:change': ViewportState;
-  'selection:change': { selected: readonly GanttId[]; added: readonly GanttId[]; removed: readonly GanttId[] };
-  'hover:change': { taskId: GanttId | null; rowIndex: number | null };
-  'drag:start': DragState;
-  'drag:move': DragState;
-  'drag:end': { drag: DragState; changes: TaskChange[]; cancelled: boolean };
-  'task:click': { task: GanttTask<T>; modifiers: PointerModifiers; position: Point };
-  'task:dblclick': { task: GanttTask<T>; position: Point };
-  'task:contextmenu': { task: GanttTask<T>; position: Point };
-  'row:click': { row: GanttRow<G>; modifiers: PointerModifiers; position: Point };
-  'row:dblclick': { row: GanttRow<G>; position: Point };
-  'row:contextmenu': { row: GanttRow<G>; position: Point };
-  'row:toggle': { row: GanttRow<G>; collapsed: boolean };
-  'contextmenu:open': ContextMenuState<T, G>;
-  'contextmenu:close': void;
-  'options:change': GanttEngineOptions;
+  "data:change": { taskCount: number; groupCount: number };
+  "layout:change": LayoutResult<G>;
+  "viewport:change": ViewportState;
+  "selection:change": {
+    selected: readonly GanttId[];
+    added: readonly GanttId[];
+    removed: readonly GanttId[];
+  };
+  "hover:change": { taskId: GanttId | null; rowIndex: number | null };
+  "drag:start": DragState;
+  "drag:move": DragState;
+  "drag:end": { drag: DragState; changes: TaskChange[]; cancelled: boolean };
+  "task:click": { task: GanttTask<T>; modifiers: PointerModifiers; position: Point };
+  "task:dblclick": { task: GanttTask<T>; position: Point };
+  "task:contextmenu": { task: GanttTask<T>; position: Point };
+  "row:click": { row: GanttRow<G>; modifiers: PointerModifiers; position: Point };
+  "row:dblclick": { row: GanttRow<G>; position: Point };
+  "row:contextmenu": { row: GanttRow<G>; position: Point };
+  "row:toggle": { row: GanttRow<G>; collapsed: boolean };
+  "contextmenu:open": ContextMenuState<T, G>;
+  "contextmenu:close": void;
+  "options:change": GanttEngineOptions;
 }

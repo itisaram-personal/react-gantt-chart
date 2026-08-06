@@ -1,15 +1,15 @@
-import type { GanttGroup, GanttTask } from '@gantt-chart/core';
-import type { GanttDependency } from '@gantt-chart/echarts';
+import type { GanttGroup, GanttTask } from "@gantt-chart/core";
+import type { GanttDependency } from "@gantt-chart/echarts";
 
 export interface DemoTaskData {
   label: string;
   progress: number;
-  status: 'planned' | 'active' | 'blocked' | 'done';
+  status: "planned" | "active" | "blocked" | "done";
   color?: string;
 }
 
 export interface DemoGroupData {
-  kind: 'team' | 'project';
+  kind: "team" | "project";
 }
 
 export type DemoTask = GanttTask<DemoTaskData>;
@@ -36,7 +36,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const STATUSES: DemoTaskData['status'][] = ['planned', 'active', 'blocked', 'done'];
+const STATUSES: DemoTaskData["status"][] = ["planned", "active", "blocked", "done"];
 
 export interface GenerateOptions {
   /** Total number of tasks to produce. */
@@ -70,14 +70,14 @@ export function generate(options: GenerateOptions): DemoDataset {
 
   const groups: DemoGroup[] = [];
   for (let team = 0; team < teamCount; team++) {
-    groups.push({ id: `team-${team}`, label: `Team ${team + 1}`, data: { kind: 'team' } });
+    groups.push({ id: `team-${team}`, label: `Team ${team + 1}`, data: { kind: "team" } });
   }
   for (let project = 0; project < projectCount; project++) {
     groups.push({
       id: `project-${project}`,
       label: `Project ${project + 1}`,
       parentId: `team-${Math.floor(project / 8)}`,
-      data: { kind: 'project' },
+      data: { kind: "project" },
     });
   }
 
@@ -105,7 +105,7 @@ export function generate(options: GenerateOptions): DemoDataset {
     // realistic stretch of the calendar and neighbouring tasks overlap enough
     // to need two or three stacking lanes.
     const start = projectStart + withinProject * 3 * DAY + Math.floor(random() * 12) * HOUR;
-    const isMilestone = withinProject > 0 && withinProject % 11 === 0;
+    const isMilestone = withinProject > 0 && withinProject % 51 === 0;
     const duration = isMilestone ? 0 : (6 + Math.floor(random() * 90)) * HOUR;
 
     const status = STATUSES[Math.floor(random() * STATUSES.length)];
@@ -115,8 +115,11 @@ export function generate(options: GenerateOptions): DemoDataset {
       start,
       end: start + duration,
       data: {
-        label: isMilestone ? `Milestone ${project + 1}.${withinProject}` : `Task ${project + 1}.${withinProject + 1}`,
-        progress: status === 'done' ? 1 : status === 'planned' ? 0 : Math.round(random() * 90) / 100,
+        label: isMilestone
+          ? `Milestone ${project + 1}.${withinProject}`
+          : `Task ${project + 1}.${withinProject + 1}`,
+        progress:
+          status === "done" ? 1 : status === "planned" ? 0 : Math.round(random() * 90) / 100,
         status,
       },
     });
@@ -130,15 +133,15 @@ export function generate(options: GenerateOptions): DemoDataset {
 }
 
 /** Colour a bar by status rather than by group. */
-export function statusColor(status: DemoTaskData['status'], dark: boolean): string {
+export function statusColor(status: DemoTaskData["status"], dark: boolean): string {
   switch (status) {
-    case 'done':
-      return dark ? '#4ade80' : '#0e9f6e';
-    case 'active':
-      return dark ? '#7aa2f7' : '#3b6fe0';
-    case 'blocked':
-      return dark ? '#f87171' : '#dc2626';
+    case "done":
+      return dark ? "#4ade80" : "#0e9f6e";
+    case "active":
+      return dark ? "#7aa2f7" : "#3b6fe0";
+    case "blocked":
+      return dark ? "#f87171" : "#dc2626";
     default:
-      return dark ? '#64748b' : '#94a3b8';
+      return dark ? "#64748b" : "#94a3b8";
   }
 }

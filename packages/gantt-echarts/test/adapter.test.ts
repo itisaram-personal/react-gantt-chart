@@ -304,22 +304,22 @@ describe('drag', () => {
 describe('marquee', () => {
   it('tracks a rectangle in store state while dragging empty space', () => {
     const { engine, dom } = setup();
-    dom.dispatch('pointerdown', pointerEvent(700, 20));
+    dom.dispatch('pointerdown', pointerEvent(700, 20, { shift: true }));
     expect(engine.store.getState().marquee).toEqual({ x: 700, y: 20, width: 0, height: 0 });
 
     // Dragging up and to the left still yields a positive rectangle.
-    dom.dispatch('pointermove', pointerEvent(500, 90));
+    dom.dispatch('pointermove', pointerEvent(500, 90, { shift: true }));
     expect(engine.store.getState().marquee).toEqual({ x: 500, y: 20, width: 200, height: 70 });
 
-    dom.dispatch('pointerup', pointerEvent(500, 90));
+    dom.dispatch('pointerup', pointerEvent(500, 90, { shift: true }));
     expect(engine.store.getState().marquee).toBeNull();
   });
 
   it('selects every bar the rectangle covers and nothing outside it', () => {
     const { engine, dom } = setup();
-    dom.dispatch('pointerdown', pointerEvent(700, 10));
-    dom.dispatch('pointermove', pointerEvent(100, 100));
-    dom.dispatch('pointerup', pointerEvent(100, 100));
+    dom.dispatch('pointerdown', pointerEvent(700, 10, { shift: true }));
+    dom.dispatch('pointermove', pointerEvent(100, 100, { shift: true }));
+    dom.dispatch('pointerup', pointerEvent(100, 100, { shift: true }));
 
     const selected = Array.from(engine.selection.selected).map(String);
     expect(selected.length).toBeGreaterThan(0);
@@ -336,6 +336,9 @@ describe('marquee', () => {
 
   it('adds to the selection with ctrl and removes with alt', () => {
     const { engine, dom } = setup();
+    // Remove mode is only reachable through an alt drag, which the default map
+    // spends on panning — opt alt back into marquee to exercise the modes.
+    engine.setOptions({ interaction: { backgroundDrag: { alt: 'marquee' } } });
     engine.selection.set(['g0-t0']);
 
     dom.dispatch('pointerdown', pointerEvent(700, 10, { ctrl: true }));
@@ -357,9 +360,11 @@ describe('marquee', () => {
     engine.setOptions({ interaction: { marquee: false } });
     const before = engine.viewport.state.timeStart;
 
-    dom.dispatch('pointerdown', pointerEvent(400, 200));
-    dom.dispatch('pointermove', pointerEvent(300, 200));
-    dom.dispatch('pointerup', pointerEvent(300, 200));
+    // Shift marquees under the default map, so it is what the master switch
+    // has to override; a plain drag already pans and would prove nothing.
+    dom.dispatch('pointerdown', pointerEvent(400, 200, { shift: true }));
+    dom.dispatch('pointermove', pointerEvent(300, 200, { shift: true }));
+    dom.dispatch('pointerup', pointerEvent(300, 200, { shift: true }));
 
     expect(engine.store.getState().marquee).toBeNull();
     // Dragging content left moves the window forward in time.
@@ -372,6 +377,122 @@ describe('marquee', () => {
     dom.dispatch('pointerdown', pointerEvent(400, 200, { button: 1 }));
     dom.dispatch('pointermove', pointerEvent(300, 200, { button: 1 }));
     dom.dispatch('pointerup', pointerEvent(300, 200, { button: 1 }));
+    expect(engine.viewport.state.timeStart).toBeGreaterThan(before);
+  });
+});
+
+describe('background drag modifier map', () => {
+  it('pans on a plain drag by default, leaving the selection alone', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+    const before = engine.viewport.state.timeStart;
+
+    dom.dispatch('pointerdown', pointerEvent(400, 200));
+    dom.dispatch('pointermove', pointerEvent(300, 200));
+    dom.dispatch('pointerup', pointerEvent(300, 200));
+
+    expect(engine.store.getState().marquee).toBeNull();
+    expect(engine.viewport.state.timeStart).toBeGreaterThan(before);
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('marquees on shift and ctrl by default', () => {
+    const { engine, dom } = setup();
+    const before = engine.viewport.state.timeStart;
+
+    dom.dispatch('pointerdown', pointerEvent(700, 10, { shift: true }));
+    dom.dispatch('pointermove', pointerEvent(100, 100, { shift: true }));
+    expect(engine.store.getState().marquee).not.toBeNull();
+    dom.dispatch('pointerup', pointerEvent(100, 100, { shift: true }));
+    expect(engine.selection.selected.size).toBeGreaterThan(0);
+    expect(engine.viewport.state.timeStart).toBe(before);
+
+    engine.selection.clear();
+    dom.dispatch('pointerdown', pointerEvent(700, 10, { ctrl: true }));
+    dom.dispatch('pointermove', pointerEvent(100, 100, { ctrl: true }));
+    expect(engine.store.getState().marquee).not.toBeNull();
+    dom.dispatch('pointerup', pointerEvent(100, 100, { ctrl: true }));
+    expect(engine.selection.selected.size).toBeGreaterThan(0);
+  });
+
+  it('swaps the map back so a plain drag marquees and shift pans', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { backgroundDrag: { plain: 'marquee', shift: 'pan' } } });
+    const before = engine.viewport.state.timeStart;
+
+    dom.dispatch('pointerdown', pointerEvent(700, 10));
+    dom.dispatch('pointermove', pointerEvent(100, 100));
+    expect(engine.store.getState().marquee).not.toBeNull();
+    dom.dispatch('pointerup', pointerEvent(100, 100));
+    expect(engine.selection.selected.size).toBeGreaterThan(0);
+
+    dom.dispatch('pointerdown', pointerEvent(400, 200, { shift: true }));
+    dom.dispatch('pointermove', pointerEvent(300, 200, { shift: true }));
+    dom.dispatch('pointerup', pointerEvent(300, 200, { shift: true }));
+    expect(engine.viewport.state.timeStart).toBeGreaterThan(before);
+  });
+
+  it('starts no gesture at all when the resolved action is none', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { backgroundDrag: { plain: 'none' } } });
+    engine.selection.set(['g0-t0']);
+    const before = engine.viewport.state.timeStart;
+
+    dom.dispatch('pointerdown', pointerEvent(400, 200));
+    dom.dispatch('pointermove', pointerEvent(300, 200));
+    dom.dispatch('pointerup', pointerEvent(300, 200));
+
+    expect(engine.store.getState().marquee).toBeNull();
+    expect(engine.viewport.state.timeStart).toBe(before);
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('still clears the selection on a click when a plain drag pans', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { backgroundDrag: { plain: 'pan' } } });
+    engine.selection.set(['g0-t0']);
+
+    // A press and release with no travel is a click, not a pan.
+    dom.dispatch('pointerdown', pointerEvent(EMPTY_SPACE.x, EMPTY_SPACE.y));
+    dom.dispatch('pointerup', pointerEvent(EMPTY_SPACE.x, EMPTY_SPACE.y));
+
+    expect(engine.selection.selected.size).toBe(0);
+  });
+
+  it('does not treat a real pan as a background click', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { backgroundDrag: { plain: 'pan' } } });
+    engine.selection.set(['g0-t0']);
+
+    dom.dispatch('pointerdown', pointerEvent(400, 200));
+    dom.dispatch('pointermove', pointerEvent(300, 200));
+    dom.dispatch('pointerup', pointerEvent(300, 200));
+
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('leaves the selection alone on a middle-button click', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
+    dom.dispatch('pointerdown', pointerEvent(EMPTY_SPACE.x, EMPTY_SPACE.y, { button: 1 }));
+    dom.dispatch('pointerup', pointerEvent(EMPTY_SPACE.x, EMPTY_SPACE.y, { button: 1 }));
+
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('keeps `marquee: false` as a master switch over the map', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({
+      interaction: { marquee: false, backgroundDrag: { plain: 'marquee' } },
+    });
+    const before = engine.viewport.state.timeStart;
+
+    dom.dispatch('pointerdown', pointerEvent(400, 200));
+    dom.dispatch('pointermove', pointerEvent(300, 200));
+    dom.dispatch('pointerup', pointerEvent(300, 200));
+
+    expect(engine.store.getState().marquee).toBeNull();
     expect(engine.viewport.state.timeStart).toBeGreaterThan(before);
   });
 });

@@ -91,6 +91,11 @@ bars — the part that can number in the thousands — go through the canvas.
   optional roll-up of hidden descendants onto the nearest visible ancestor.
 - **Selection** — click, ctrl-click, shift-range over *visual* order, marquee,
   select-all/invert, keyboard navigation.
+- **Background gesture** — a drag on empty space marquee-selects or pans,
+  per modifier. `interaction.backgroundDrag` maps `plain`/`ctrl`/`shift`/`alt`
+  to `'marquee' | 'pan' | 'none'`; the default pans on a plain drag and marquees
+  on shift or ctrl. Set `plain: 'marquee'` for drag-to-select instead, and
+  `alt: 'marquee'` to regain remove-mode marquee.
 - **Drag & resize** — move a selection horizontally, or freely when it is
   confined to one row; resize from edge handles; optional snapping. Gestures
   propose `TaskChange[]`; nothing mutates until you accept it.

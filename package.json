@@ -17,6 +17,8 @@
     "build": "npm run build -w @gantt-chart/core && npm run build -w @gantt-chart/themes && npm run build -w @gantt-chart/echarts && npm run build -w @gantt-chart/react",
     "dev": "npm run dev -w @gantt-chart/demo",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -27,6 +29,7 @@
     "@types/node": "^20.12.7",
     "@vitest/coverage-v8": "^1.6.0",
     "jsdom": "^30.0.1",
+    "prettier": "3.9.6",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   }

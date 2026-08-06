@@ -1,4 +1,4 @@
-import type { DeepPartial, GanttEngineOptions } from './types';
+import type { DeepPartial, GanttEngineOptions } from "./types";
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -32,11 +32,20 @@ export const defaultOptions: GanttEngineOptions = {
     resize: true,
     snapMs: 0,
     marquee: true,
+    // Plain drag pans, like a map; hold a modifier to rubber-band instead.
+    // Note that alt panning gives up remove-mode marquee, which is only
+    // reachable through an alt drag — set `alt: 'marquee'` to get it back.
+    backgroundDrag: {
+      plain: "pan",
+      ctrl: "marquee",
+      shift: "marquee",
+      alt: "pan",
+    },
     wheel: {
-      plain: 'scroll',
-      ctrl: 'zoom',
-      shift: 'pan',
-      alt: 'none',
+      plain: "scroll",
+      ctrl: "zoom",
+      shift: "pan",
+      alt: "none",
     },
   },
   minTimeSpan: MINUTE,
@@ -58,6 +67,10 @@ export function resolveOptions(
     interaction: {
       ...base.interaction,
       ...partial.interaction,
+      backgroundDrag: {
+        ...base.interaction.backgroundDrag,
+        ...partial.interaction?.backgroundDrag,
+      },
       wheel: { ...base.interaction.wheel, ...partial.interaction?.wheel },
     },
   };

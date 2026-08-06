@@ -5,11 +5,10 @@ import {
   type GanttId,
   type GanttRow,
   type TaskChange,
+  type GanttEngineOptions,
+  type DeepPartial,
 } from "@gantt-chart/core";
-import {
-  defaultItemRenderer,
-  type GanttItemRenderer,
-} from "@gantt-chart/echarts";
+import { defaultItemRenderer, type GanttItemRenderer } from "@gantt-chart/echarts";
 import { GanttChart } from "@gantt-chart/react";
 import "@gantt-chart/react/styles.css";
 import {
@@ -55,21 +54,30 @@ export function App(): JSX.Element {
   const [selection, setSelection] = useState<GanttId[]>([]);
 
   const dataset = useMemo(
-    () => generate({ taskCount, tasksPerProject: tasksPerRow,withDependencies:false }),
+    () =>
+      generate({
+        taskCount,
+        tasksPerProject: tasksPerRow,
+        withDependencies: false,
+      }),
     [taskCount, tasksPerRow],
   );
   const [tasks, setTasks] = useState<DemoTask[]>(dataset.tasks);
   useEffect(() => setTasks(dataset.tasks), [dataset]);
 
   /**
+   * No `groups` are passed to the chart, so the engine synthesizes one flat row
+   * per distinct `task.groupId` — the row count is that distinct count, not the
+   * generator's group list (which still carries the unused team/project tree).
+   */
+  const rowCount = useMemo(() => new Set(tasks.map((task) => task.groupId)).size, [tasks]);
+
+  /**
    * Frame roughly six weeks around today. The engine's own default is to fit the
    * whole domain, which here is 18 months — correct, but every bar would be a
    * sliver. "Fit" in the toolbar goes back to that view.
    */
-  const [engine, setEngine] = useState<GanttEngine<
-    DemoTaskData,
-    DemoGroupData
-  > | null>(null);
+  const [engine, setEngine] = useState<GanttEngine<DemoTaskData, DemoGroupData> | null>(null);
   useEffect(() => {
     if (!engine) return;
     const start = Date.now() - 7 * DAY;
@@ -80,18 +88,19 @@ export function App(): JSX.Element {
   const [historyDepth, setHistoryDepth] = useState({ undo: 0, redo: 0 });
   const stats = useFrameStats(engine as GanttEngine<unknown, unknown> | null);
 
-  const options = useMemo(
+  const options: DeepPartial<GanttEngineOptions> = useMemo(
     () => ({
       stacking: { enabled: stacking, rollupCollapsed: rollup, maxLanes },
-      interaction: { snapMs },
+      interaction: {
+        snapMs,
+        backgroundDrag: { alt: "pan", plain: "pan", ctrl: "marquee", shift: "marquee" },
+      },
     }),
     [stacking, rollup, maxLanes, snapMs],
   );
 
   /** Colour by status instead of by group — the same hook a consumer would use. */
-  const itemRenderer = useMemo<
-    GanttItemRenderer<DemoTaskData, DemoGroupData> | undefined
-  >(() => {
+  const itemRenderer = useMemo<GanttItemRenderer<DemoTaskData, DemoGroupData> | undefined>(() => {
     if (!colorByStatus) return undefined;
     return (context) =>
       defaultItemRenderer({
@@ -100,10 +109,7 @@ export function App(): JSX.Element {
           ...context.task,
           data: {
             ...(context.task.data as DemoTaskData),
-            color: statusColor(
-              (context.task.data as DemoTaskData).status,
-              context.theme.dark,
-            ),
+            color: statusColor((context.task.data as DemoTaskData).status, context.theme.dark),
           },
         },
       });
@@ -167,7 +173,14 @@ export function App(): JSX.Element {
             setTasks((current) =>
               current.map((task) =>
                 own.has(task.id) && task.data
-                  ? { ...task, data: { ...task.data, status: "done" as const, progress: 1 } }
+                  ? {
+                      ...task,
+                      data: {
+                        ...task.data,
+                        status: "done" as const,
+                        progress: 1,
+                      },
+                    }
                   : task,
               ),
             );
@@ -176,13 +189,7 @@ export function App(): JSX.Element {
         {
           id: "log",
           label: `Log row (${row.laneCount} ${row.laneCount === 1 ? "lane" : "lanes"})`,
-          onSelect: () =>
-            console.log("[demo] row", row.group.id, {
-              label: row.group.label,
-              kind: row.group.data?.kind,
-              depth: row.depth,
-              lanes: row.laneCount,
-            }),
+          onSelect: () => console.log("[demo] row", row.group.id, row),
         },
       ];
     },
@@ -217,17 +224,12 @@ export function App(): JSX.Element {
       <header className="app__bar">
         <div className="app__title">
           <strong>Gantt</strong>
-          <span className="app__muted">
-            ECharts custom series · virtualized engine
-          </span>
+          <span className="app__muted">ECharts custom series · virtualized engine</span>
         </div>
 
         <label className="app__field">
           Tasks
-          <select
-            value={taskCount}
-            onChange={(event) => setTaskCount(Number(event.target.value))}
-          >
+          <select value={taskCount} onChange={(event) => setTaskCount(Number(event.target.value))}>
             {SIZES.map((size) => (
               <option key={size} value={size}>
                 {size.toLocaleString()}
@@ -236,10 +238,7 @@ export function App(): JSX.Element {
           </select>
         </label>
 
-        <label
-          className="app__field"
-          title="Tasks generated per row — how much there is to stack"
-        >
+        <label className="app__field" title="Tasks generated per row — how much there is to stack">
           Per row
           <select
             value={tasksPerRow}
@@ -258,10 +257,7 @@ export function App(): JSX.Element {
           title="Lane ceiling per row — extra tasks pack into the last lane"
         >
           Max lanes
-          <select
-            value={maxLanes}
-            onChange={(event) => setMaxLanes(Number(event.target.value))}
-          >
+          <select value={maxLanes} onChange={(event) => setMaxLanes(Number(event.target.value))}>
             {MAX_LANES.map((option) => (
               <option key={option.label} value={option.value}>
                 {option.label}
@@ -272,10 +268,7 @@ export function App(): JSX.Element {
 
         <label className="app__field">
           Snap
-          <select
-            value={snapMs}
-            onChange={(event) => setSnapMs(Number(event.target.value))}
-          >
+          <select value={snapMs} onChange={(event) => setSnapMs(Number(event.target.value))}>
             {SNAPS.map((snap) => (
               <option key={snap.label} value={snap.value}>
                 {snap.label}
@@ -292,16 +285,8 @@ export function App(): JSX.Element {
           onChange={setRollup}
           title="Show hidden children on their collapsed ancestor"
         />
-        <Toggle
-          label="Links"
-          checked={showDependencies}
-          onChange={setShowDependencies}
-        />
-        <Toggle
-          label="Colour by status"
-          checked={colorByStatus}
-          onChange={setColorByStatus}
-        />
+        <Toggle label="Links" checked={showDependencies} onChange={setShowDependencies} />
+        <Toggle label="Colour by status" checked={colorByStatus} onChange={setColorByStatus} />
 
         <div className="app__buttons">
           <button type="button" onClick={() => engine?.viewport.fitTime()}>
@@ -313,18 +298,10 @@ export function App(): JSX.Element {
           <button type="button" onClick={() => engine?.expandAll()}>
             Expand
           </button>
-          <button
-            type="button"
-            onClick={undo}
-            disabled={historyDepth.undo === 0}
-          >
+          <button type="button" onClick={undo} disabled={historyDepth.undo === 0}>
             Undo
           </button>
-          <button
-            type="button"
-            onClick={redo}
-            disabled={historyDepth.redo === 0}
-          >
+          <button type="button" onClick={redo} disabled={historyDepth.redo === 0}>
             Redo
           </button>
         </div>
@@ -333,7 +310,6 @@ export function App(): JSX.Element {
       <div className="app__chart">
         <GanttChart<DemoTaskData, DemoGroupData>
           tasks={tasks}
-          groups={dataset.groups}
           options={options}
           theme={dark ? "dark" : "light"}
           locale="en-GB"
@@ -343,9 +319,7 @@ export function App(): JSX.Element {
           onSelectionChange={setSelection}
           rowMenuItems={rowMenuItems}
           engineRef={setEngine}
-          headerCorner={
-            <span>{dataset.groups.length.toLocaleString()} rows</span>
-          }
+          headerCorner={<span>{rowCount.toLocaleString()} rows</span>}
           showTimeZoomBar={true}
           showRowZoomBar={true}
           showScrollbar={false}
@@ -354,10 +328,7 @@ export function App(): JSX.Element {
 
       <footer className="app__stats">
         <Stat label="tasks" value={tasks.length.toLocaleString()} />
-        <Stat
-          label="generated"
-          value={`${dataset.generatedIn.toFixed(0)} ms`}
-        />
+        <Stat label="generated" value={`${dataset.generatedIn.toFixed(0)} ms`} />
         <Stat label="fps" value={String(stats.fps)} />
         <Stat label="bars drawn" value={stats.visibleItems.toLocaleString()} />
         <Stat label="candidates" value={stats.candidates.toLocaleString()} />
@@ -367,9 +338,8 @@ export function App(): JSX.Element {
           <span className="app__warn">frame truncated by maxVisibleItems</span>
         ) : null}
         <span className="app__hint">
-          drag bars · drag edges to resize · marquee on empty space · wheel
-          scrolls · ctrl+wheel zooms · right-click for menu · hover a row label
-          for ⋯
+          drag bars · drag edges to resize · drag empty space to pan · shift+drag marquees · wheel
+          scrolls · ctrl+wheel zooms · right-click for menu · hover a row label for ⋯
         </span>
       </footer>
     </div>

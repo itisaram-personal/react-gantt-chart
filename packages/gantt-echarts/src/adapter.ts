@@ -1,10 +1,12 @@
 import type {
+  BackgroundDragAction,
   GanttEngine,
   GanttId,
   GanttTheme,
   Point,
   PointerModifiers,
   Rect,
+  SelectionMode,
   Unsubscribe,
 } from '@gantt-chart/core';
 import type { GanttItemRenderer } from './itemRenderer';
@@ -53,6 +55,17 @@ export interface GanttAdapterOptions<T = unknown, G = unknown> {
 /** Below this, a marquee is treated as a click on the background. */
 const MARQUEE_MIN_AREA = 12;
 
+/**
+ * Below this travel (px), a background pan is treated as a click instead.
+ *
+ * Without it, configuring a plain drag to pan would silently cost you the
+ * click-empty-space-to-clear-selection behaviour the marquee gesture provides.
+ */
+const PAN_CLICK_SLOP = 3;
+
+/** The subset of {@link SelectionMode} a background gesture can produce. */
+type MarqueeMode = Extract<SelectionMode, 'replace' | 'add' | 'remove'>;
+
 type Gesture =
   | { kind: 'none' }
   | {
@@ -62,8 +75,17 @@ type Gesture =
       wasSelected: boolean;
       modifiers: PointerModifiers;
     }
-  | { kind: 'marquee'; pointerId: number; origin: Point; mode: 'replace' | 'add' | 'remove' }
-  | { kind: 'pan'; pointerId: number; last: Point };
+  | { kind: 'marquee'; pointerId: number; origin: Point; mode: MarqueeMode }
+  | {
+      kind: 'pan';
+      pointerId: number;
+      origin: Point;
+      last: Point;
+      /** Modifiers at press, for background-click semantics on a no-move release. */
+      modifiers: PointerModifiers;
+      /** False for middle-button pans, which never stand in for a click. */
+      click: boolean;
+    };
 
 const schedule: (callback: () => void) => number =
   typeof requestAnimationFrame === 'function'
@@ -269,7 +291,14 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     // Middle button pans, matching every map and timeline tool.
     if (event.button === 1) {
       event.preventDefault();
-      this.gesture = { kind: 'pan', pointerId: event.pointerId, last: point };
+      this.gesture = {
+        kind: 'pan',
+        pointerId: event.pointerId,
+        origin: point,
+        last: point,
+        modifiers: modifiersOf(event),
+        click: false,
+      };
       capturePointer(dom, event.pointerId);
       return;
     }
@@ -293,14 +322,66 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       return;
     }
 
-    if (interaction.marquee && interaction.selection) {
-      const mode = modifiers.alt ? 'remove' : modifiers.ctrl || modifiers.meta ? 'add' : 'replace';
+    const action = this.backgroundDragAction(modifiers);
+    if (action === 'none') {
+      this.gesture = { kind: 'none' };
+      return;
+    }
+
+    if (action === 'marquee') {
+      const mode = marqueeModeOf(modifiers);
       this.gesture = { kind: 'marquee', pointerId: event.pointerId, origin: point, mode };
       this.engine.store.setState({ marquee: { x: point.x, y: point.y, width: 0, height: 0 } });
     } else {
-      this.gesture = { kind: 'pan', pointerId: event.pointerId, last: point };
+      this.gesture = {
+        kind: 'pan',
+        pointerId: event.pointerId,
+        origin: point,
+        last: point,
+        modifiers,
+        click: true,
+      };
     }
     capturePointer(dom, event.pointerId);
+  }
+
+  /**
+   * Gesture for a left-button drag on empty background.
+   *
+   * Mirrors the wheel resolution order — ctrl/meta, shift, alt, then plain — so
+   * both modifier maps behave the same way.
+   */
+  private backgroundDragAction(modifiers: PointerModifiers): BackgroundDragAction {
+    const interaction = this.engine.getOptions().interaction;
+    const map = interaction.backgroundDrag;
+    const action =
+      modifiers.ctrl || modifiers.meta
+        ? map.ctrl
+        : modifiers.shift
+          ? map.shift
+          : modifiers.alt
+            ? map.alt
+            : map.plain;
+
+    // `marquee` and `selection` stay master switches: a marquee we are not
+    // allowed to draw degrades to a pan, as it did before this map existed.
+    if (action === 'marquee' && !(interaction.marquee && interaction.selection)) return 'pan';
+    return action;
+  }
+
+  /**
+   * Selection semantics for a press on empty background that never travelled
+   * far enough to be a drag. Shared by the marquee and pan gestures so the
+   * choice of background gesture does not change what a click does.
+   */
+  private backgroundClick(point: Point, mode: MarqueeMode, event: PointerEvent): void {
+    if (mode === 'replace' && this.engine.getOptions().interaction.selection) {
+      this.engine.selection.clear();
+    }
+    const row = this.engine.nearestRow(point.y);
+    if (row) {
+      this.engine.events.emit('row:click', { row, modifiers: modifiersOf(event), position: point });
+    }
   }
 
   private onPointerMove(event: PointerEvent): void {
@@ -357,14 +438,21 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
 
         if (rect.width * rect.height < MARQUEE_MIN_AREA) {
           // A plain click on empty space clears the selection.
-          if (gesture.mode === 'replace') this.engine.selection.clear();
-          const row = this.engine.nearestRow(point.y);
-          if (row) {
-            this.engine.events.emit('row:click', { row, modifiers: modifiersOf(event), position: point });
-          }
+          this.backgroundClick(point, gesture.mode, event);
           return;
         }
         this.engine.selection.selectRect(this.toContentRect(rect), gesture.mode);
+        return;
+      }
+      case 'pan': {
+        // A pan that never travelled is a click on the background, and has to
+        // mean the same thing there as it does under the marquee gesture.
+        if (!gesture.click) return;
+        const dx = point.x - gesture.origin.x;
+        const dy = point.y - gesture.origin.y;
+        if (dx * dx + dy * dy <= PAN_CLICK_SLOP * PAN_CLICK_SLOP) {
+          this.backgroundClick(point, marqueeModeOf(gesture.modifiers), event);
+        }
         return;
       }
       default:
@@ -568,6 +656,13 @@ function releasePointer(dom: HTMLElement | null, pointerId: number): void {
 
 function modifiersOf(event: MouseEvent | PointerEvent | KeyboardEvent): PointerModifiers {
   return { ctrl: event.ctrlKey, shift: event.shiftKey, meta: event.metaKey, alt: event.altKey };
+}
+
+/** Alt removes from the selection, ctrl/meta adds, anything else replaces. */
+function marqueeModeOf(modifiers: PointerModifiers): MarqueeMode {
+  if (modifiers.alt) return 'remove';
+  if (modifiers.ctrl || modifiers.meta) return 'add';
+  return 'replace';
 }
 
 function normalizeRect(a: Point, b: Point): Rect {

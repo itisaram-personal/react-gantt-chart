@@ -1,5 +1,5 @@
-import type { GanttRenderContext, GanttTask } from '@gantt-chart/core';
-import { fontShorthand, group, type GanttElement } from './elements';
+import type { GanttRenderContext, GanttTask } from "@gantt-chart/core";
+import { fontShorthand, group, type GanttElement } from "./elements";
 
 /**
  * Turns one bar's render context into elements.
@@ -70,10 +70,12 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
     : state.hovered
       ? theme.colors.hoverStroke
       : theme.colors.taskStroke;
-  const lineWidth = state.selected ? theme.metrics.selectedStrokeWidth : theme.metrics.itemStrokeWidth;
+  const lineWidth = state.selected
+    ? theme.metrics.selectedStrokeWidth
+    : theme.metrics.itemStrokeWidth;
 
   const bar: GanttElement = {
-    type: 'rect',
+    type: "rect",
     shape: {
       x: geometry.x,
       y: geometry.y,
@@ -91,9 +93,9 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
   };
 
   const progressFill =
-    typeof progress === 'number' && progress > 0
+    typeof progress === "number" && progress > 0
       ? ({
-          type: 'rect',
+          type: "rect",
           shape: {
             x: geometry.x,
             y: geometry.y,
@@ -103,7 +105,7 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
           },
           // A darkened overlay reads as "done" against any palette colour without
           // needing a second colour per series.
-          style: { fill: theme.dark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.26)' },
+          style: { fill: theme.dark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.26)" },
           silent: true,
         } satisfies GanttElement)
       : null;
@@ -113,18 +115,18 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
   const label =
     clipped.width >= MIN_LABEL_WIDTH && geometry.height >= 10
       ? ({
-          type: 'text',
+          type: "text",
           style: {
             text: taskLabel(task),
             x: clipped.x + LABEL_PADDING,
             y: geometry.y + geometry.height / 2,
             fill: textColor ?? theme.colors.taskText,
             font: fontShorthand(theme.font.weight, theme.font.labelSize, theme.font.family),
-            textVerticalAlign: 'middle',
-            textAlign: 'left',
+            textVerticalAlign: "middle",
+            textAlign: "left",
             width: Math.max(0, clipped.width - LABEL_PADDING * 2),
-            overflow: 'truncate',
-            ellipsis: '…',
+            overflow: "truncate",
+            ellipsis: "…",
           },
           silent: true,
           z2: 2,
@@ -146,7 +148,7 @@ function renderMilestone<T, G>(context: GanttRenderContext<T, G>): GanttElement 
 
   const fill = meta(task).color ?? theme.colors.milestoneFill;
   const diamond: GanttElement = {
-    type: 'polygon',
+    type: "polygon",
     shape: {
       points: [
         [cx, cy - half],
@@ -171,18 +173,18 @@ function renderMilestone<T, G>(context: GanttRenderContext<T, G>): GanttElement 
   const label: GanttElement | null =
     cx + half + 4 < context.viewport.width
       ? {
-          type: 'text',
+          type: "text",
           style: {
             text: taskLabel(task),
             x: cx + half + 4,
             y: cy,
             fill: theme.colors.text,
             font: fontShorthand(theme.font.weight, theme.font.labelSize, theme.font.family),
-            textVerticalAlign: 'middle',
-            textAlign: 'left',
+            textVerticalAlign: "middle",
+            textAlign: "left",
             width: Math.max(0, context.viewport.width - (cx + half + 8)),
-            overflow: 'truncate',
-            ellipsis: '…',
+            overflow: "truncate",
+            ellipsis: "…",
           },
           silent: true,
           z2: 2,
