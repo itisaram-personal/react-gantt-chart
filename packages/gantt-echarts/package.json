@@ -32,13 +32,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gantt-chart/core": "^0.0.1"
-  },
-  "peerDependencies": {
+    "@gantt-chart/core": "^0.0.1",
     "echarts": "^5.4.0"
   },
   "devDependencies": {
-    "echarts": "^5.5.0",
     "tsup": "^8.0.2",
     "typescript": "^5.4.5"
   }

@@ -3,7 +3,7 @@
 React components and hooks for the Gantt chart.
 
 ```bash
-npm install @gantt-chart/react @gantt-chart/echarts @gantt-chart/core @gantt-chart/themes echarts react react-dom
+npm install @gantt-chart/react
 ```
 
 ```tsx

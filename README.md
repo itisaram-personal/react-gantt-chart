@@ -18,7 +18,7 @@ search over row and time indexes.
 ## Quick start
 
 ```bash
-npm install @gantt-chart/react @gantt-chart/echarts @gantt-chart/core @gantt-chart/themes echarts
+npm install @gantt-chart/react
 ```
 
 ```tsx

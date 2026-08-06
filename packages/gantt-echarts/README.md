@@ -3,7 +3,7 @@
 The ECharts renderer for the Gantt engine, plus the input handling that drives it.
 
 ```bash
-npm install @gantt-chart/echarts @gantt-chart/core echarts
+npm install @gantt-chart/echarts
 ```
 
 ## The approach
