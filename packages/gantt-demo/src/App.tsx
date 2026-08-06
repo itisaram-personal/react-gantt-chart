@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GanttHistory,
   type GanttEngine,
@@ -9,7 +9,7 @@ import {
   type DeepPartial,
 } from "@gantt-chart/core";
 import { defaultItemRenderer, type GanttItemRenderer } from "@gantt-chart/echarts";
-import { GanttChart } from "@gantt-chart/react";
+import { GanttChart, type GanttExportApi, type GanttExportScope } from "@gantt-chart/react";
 import "@gantt-chart/react/styles.css";
 import {
   generate,
@@ -196,6 +196,30 @@ export function App(): JSX.Element {
     [tasks],
   );
 
+  /**
+   * PNG export.
+   *
+   * "PNG" saves what is on screen; "PNG all" saves every row and the whole time
+   * domain, which is where the canvas size limit bites — a few thousand rows do
+   * not fit in one image, and the exporter says so rather than cropping. The
+   * message goes to the footer so the failure is visible without the console.
+   */
+  const exporter = useRef<GanttExportApi>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+
+  const exportPng = useCallback(async (scope: GanttExportScope) => {
+    const api = exporter.current;
+    if (!api) return;
+    setExportNote(`exporting ${scope}…`);
+    try {
+      const started = performance.now();
+      await api.download({ scope, filename: `gantt-${scope}.png` });
+      setExportNote(`${scope} PNG saved in ${Math.round(performance.now() - started)} ms`);
+    } catch (error) {
+      setExportNote(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
   const applyAndRecord = useCallback(
     (next: DemoTask[], changes: TaskChange[]) => {
       setTasks(next);
@@ -304,6 +328,20 @@ export function App(): JSX.Element {
           <button type="button" onClick={redo} disabled={historyDepth.redo === 0}>
             Redo
           </button>
+          <button
+            type="button"
+            onClick={() => void exportPng("viewport")}
+            title="Save the visible chart as a PNG"
+          >
+            PNG
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportPng("full")}
+            title="Save every row and the whole time domain as one PNG"
+          >
+            PNG all
+          </button>
         </div>
       </header>
 
@@ -319,6 +357,7 @@ export function App(): JSX.Element {
           onSelectionChange={setSelection}
           rowMenuItems={rowMenuItems}
           engineRef={setEngine}
+          exportRef={exporter}
           headerCorner={<span>{rowCount.toLocaleString()} rows</span>}
           showTimeZoomBar={true}
           showRowZoomBar={true}
@@ -337,6 +376,7 @@ export function App(): JSX.Element {
         {stats.truncated ? (
           <span className="app__warn">frame truncated by maxVisibleItems</span>
         ) : null}
+        {exportNote ? <span className="app__muted">{exportNote}</span> : null}
         <span className="app__hint">
           drag bars · drag edges to resize · drag empty space to pan · shift+drag marquees · wheel
           scrolls · ctrl+wheel zooms · right-click for menu · hover a row label for ⋯

@@ -101,6 +101,10 @@ bars — the part that can number in the thousands — go through the canvas.
   propose `TaskChange[]`; nothing mutates until you accept it.
 - **Undo/redo** — `GanttHistory` inverts change sets, so history costs nothing
   per task.
+- **PNG export** — `exportRef.current.download()` for what is on screen, or
+  `{ scope: 'full' }` for every row and the whole time domain in one image. The
+  plot is re-rendered offscreen and the header and gutter are drawn onto it, so
+  the file looks like the widget — and the live chart never moves.
 - **Plugins & overlays** — contribute extra render layers. Dependency arrows ship
   as one (`dependenciesPlugin`) and are indexed so per-frame cost tracks what is
   visible, not the size of the graph.

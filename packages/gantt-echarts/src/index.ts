@@ -16,6 +16,24 @@ export type { CreateGanttChartInput, EChartsModuleLike } from './create';
 export { buildGanttOption } from './option';
 export type { GanttOption, GanttOptionInput, GanttCustomSeries } from './option';
 
+export {
+  downloadGanttPng,
+  ganttToPngBlob,
+  ganttToPngDataURL,
+  planGanttExport,
+  renderGanttToCanvas,
+  resolveExportFrame,
+} from './export';
+export type {
+  GanttDownloadInput,
+  GanttExportFrame,
+  GanttExportInput,
+  GanttExportOptions,
+  GanttExportPlan,
+  GanttExportResult,
+  GanttExportScope,
+} from './export';
+
 export { defaultItemRenderer, taskLabel, taskColor } from './itemRenderer';
 export type { GanttItemRenderer, DefaultTaskMeta } from './itemRenderer';
 

@@ -35,6 +35,13 @@ export type { GanttContextMenuProps, GanttMenuItem } from './GanttContextMenu';
 export { useGanttEngine } from './useGanttEngine';
 export type { UseGanttEngineInput } from './useGanttEngine';
 
+export { useGanttExport } from './useGanttExport';
+export type {
+  GanttDownloadOptions,
+  GanttExportApi,
+  UseGanttExportInput,
+} from './useGanttExport';
+
 export { useEngineState, useEngineVersion } from './useEngineState';
 export { useElementSize } from './useResizeObserver';
 export type { Size } from './useResizeObserver';
@@ -53,6 +60,12 @@ export type {
   ViewportState,
 } from '@gantt-chart/core';
 export { GanttHistory } from '@gantt-chart/core';
-export type { GanttDependency, GanttItemRenderer } from '@gantt-chart/echarts';
+export type {
+  GanttDependency,
+  GanttExportOptions,
+  GanttExportResult,
+  GanttExportScope,
+  GanttItemRenderer,
+} from '@gantt-chart/echarts';
 export { createTheme, darkTheme, lightTheme, resolveTheme } from '@gantt-chart/themes';
 export type { GanttTheme } from '@gantt-chart/themes';
