@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
 import {
   applyChanges,
   type AxisRowDescriptor,
@@ -13,28 +13,30 @@ import {
   type GanttTask,
   type TaskChange,
   type ViewportState,
-} from '@gantt-chart/core';
+} from "@gantt-chart/core";
 import {
   dependenciesPlugin,
   type GanttDependency,
   type GanttEChartsAdapter,
+  type GanttExportOptions,
   type GanttItemRenderer,
-} from '@gantt-chart/echarts';
-import { resolveTheme, themeCssVariables, type GanttTheme } from '@gantt-chart/themes';
-import { GanttContextMenu, type GanttMenuItem } from './GanttContextMenu';
-import { GanttPlot } from './GanttPlot';
-import { GanttRowGutter } from './GanttRowGutter';
-import { GanttScrollbar } from './GanttScrollbar';
-import { GanttTimeHeader } from './GanttTimeHeader';
-import { GanttTooltip, type GanttTooltipContext } from './GanttTooltip';
-import { GanttRowZoomBar, GanttTimeZoomBar } from './GanttZoomBar';
-import { useGanttEngine } from './useGanttEngine';
+} from "@gantt-chart/echarts";
+import { resolveTheme, themeCssVariables, type GanttTheme } from "@gantt-chart/themes";
+import { GanttContextMenu, type GanttMenuItem } from "./GanttContextMenu";
+import { GanttPlot } from "./GanttPlot";
+import { GanttRowGutter } from "./GanttRowGutter";
+import { GanttScrollbar } from "./GanttScrollbar";
+import { GanttTimeHeader } from "./GanttTimeHeader";
+import { GanttTooltip, type GanttTooltipContext } from "./GanttTooltip";
+import { GanttRowZoomBar, GanttTimeZoomBar } from "./GanttZoomBar";
+import { useGanttEngine } from "./useGanttEngine";
+import { useGanttExport, type GanttExportApi } from "./useGanttExport";
 
 export interface GanttChartProps<T = unknown, G = unknown> {
   tasks: readonly GanttTask<T>[];
   groups?: readonly GanttGroup<G>[];
   options?: DeepPartial<GanttEngineOptions>;
-  theme?: GanttTheme | 'light' | 'dark';
+  theme?: GanttTheme | "light" | "dark";
 
   className?: string;
   style?: CSSProperties;
@@ -112,12 +114,25 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   now?: number | null;
   locale?: string;
   weekStartsOn?: 0 | 1;
-  renderer?: 'canvas' | 'svg';
+  renderer?: "canvas" | "svg";
 
   /** Escape hatch to the engine, for undo stacks, exports, custom toolbars. */
   engineRef?: Ref<GanttEngine<T, G>>;
   /** Receives the ECharts adapter once attached, and `null` on teardown. */
   onAdapter?: (adapter: GanttEChartsAdapter<T, G> | null) => void;
+  /**
+   * Receives a PNG exporter for this chart — `toCanvas`, `toDataURL`, `toBlob`
+   * and `download`, each taking a scope (`'viewport'` or `'full'`), a size and a
+   * pixel ratio.
+   *
+   * The exporter renders its own chart rather than screenshotting this one, so a
+   * `'full'` export can be a different size and time window than the live view
+   * without moving it. Defaults follow this component's chrome props, so an
+   * export matches the widget unless a call says otherwise.
+   */
+  exportRef?: Ref<GanttExportApi>;
+  /** Defaults for every `exportRef` call. */
+  exportOptions?: GanttExportOptions;
 }
 
 /**
@@ -134,10 +149,10 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     tasks,
     groups,
     options,
-    theme: themeInput = 'light',
+    theme: themeInput = "light",
     className,
     style,
-    height = '100%',
+    height = "100%",
     showHeader = true,
     showRowGutter = true,
     showRowMenu = true,
@@ -178,7 +193,8 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
   }, [dependencyPlugin, theme]);
 
   useEffect(() => {
-    if (dependencyPlugin && props.dependencies) dependencyPlugin.setDependencies(props.dependencies);
+    if (dependencyPlugin && props.dependencies)
+      dependencyPlugin.setDependencies(props.dependencies);
   }, [dependencyPlugin, props.dependencies]);
 
   // Callbacks live in a ref so a parent re-render never re-subscribes the bus.
@@ -187,20 +203,22 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
 
   useEffect(() => {
     const offs = [
-      engine.on('drag:end', ({ changes, cancelled }) => {
+      engine.on("drag:end", ({ changes, cancelled }) => {
         if (cancelled || changes.length === 0) return;
         handlers.current.onChanges?.(changes);
         const onTasksChange = handlers.current.onTasksChange;
         if (onTasksChange) onTasksChange(applyChanges(engine.getTasks(), changes), changes);
         else engine.applyChanges(changes);
       }),
-      engine.on('selection:change', ({ selected }) =>
+      engine.on("selection:change", ({ selected }) =>
         handlers.current.onSelectionChange?.(selected.slice()),
       ),
-      engine.on('task:click', ({ task }) => handlers.current.onTaskClick?.(task)),
-      engine.on('task:dblclick', ({ task }) => handlers.current.onTaskDoubleClick?.(task)),
-      engine.on('row:toggle', ({ row, collapsed }) => handlers.current.onRowToggle?.(row, collapsed)),
-      engine.on('viewport:change', (viewport) => handlers.current.onViewportChange?.(viewport)),
+      engine.on("task:click", ({ task }) => handlers.current.onTaskClick?.(task)),
+      engine.on("task:dblclick", ({ task }) => handlers.current.onTaskDoubleClick?.(task)),
+      engine.on("row:toggle", ({ row, collapsed }) =>
+        handlers.current.onRowToggle?.(row, collapsed),
+      ),
+      engine.on("viewport:change", (viewport) => handlers.current.onViewportChange?.(viewport)),
     ];
     return () => {
       for (const off of offs) off();
@@ -211,7 +229,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
   const engineRef = props.engineRef;
   useEffect(() => {
     if (!engineRef) return;
-    if (typeof engineRef === 'function') {
+    if (typeof engineRef === "function") {
       engineRef(engine);
       return () => engineRef(null);
     }
@@ -223,9 +241,52 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
 
   const gutterWidth = showRowGutter ? (props.gutterWidth ?? theme.metrics.axisWidth) : 0;
 
+  /**
+   * Export defaults that mirror what this component renders — same chrome, same
+   * gutter width, same grid — so a saved PNG looks like the widget it came from.
+   * `exportOptions`, and any per-call argument, override them.
+   */
+  const exportDefaults = useMemo<GanttExportOptions>(
+    () => ({
+      showHeader,
+      showRowGutter,
+      gutterWidth,
+      showGrid,
+      showRowBands,
+      ...props.exportOptions,
+    }),
+    [showHeader, showRowGutter, gutterWidth, showGrid, showRowBands, props.exportOptions],
+  );
+
+  const exporter = useGanttExport<T, G>({
+    engine,
+    theme,
+    itemRenderer: props.itemRenderer,
+    locale,
+    weekStartsOn,
+    now,
+    defaults: exportDefaults,
+  });
+
+  // Handed over the same way as `engineRef`, supporting object and callback refs.
+  const exportRef = props.exportRef;
+  useEffect(() => {
+    if (!exportRef) return;
+    if (typeof exportRef === "function") {
+      exportRef(exporter);
+      return () => exportRef(null);
+    }
+    (exportRef as { current: GanttExportApi | null }).current = exporter;
+    return () => {
+      (exportRef as { current: GanttExportApi | null }).current = null;
+    };
+  }, [exporter, exportRef]);
+
   return (
     <div
-      className={['gantt', theme.dark ? 'gantt--dark' : 'gantt--light', className].filter(Boolean).join(' ')}
+      className={["gantt", theme.dark ? "gantt--dark" : "gantt--light", className]
+        .filter(Boolean)
+        .join(" ")}
       style={{
         ...(themeCssVariables(theme) as unknown as CSSProperties),
         height,

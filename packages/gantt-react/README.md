@@ -59,6 +59,8 @@ const undo = () => {
 | `now` | epoch ms for the marker; `null` hides it, omit for the live clock |
 | `renderer` | `'canvas'` (default) or `'svg'` |
 | `engineRef` | the engine, for toolbars, exports and undo |
+| `exportRef` | a PNG exporter for this chart (see below) |
+| `exportOptions` | defaults for every export call |
 | `showHeader` / `showRowGutter` / `showRowMenu` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
@@ -92,6 +94,38 @@ Pass `tasks`/`groups`/`options` as stable references (`useMemo`) — a new array
 identity means a re-normalize. `options` is compared by value, so an inline
 literal is safe there.
 
+## PNG export
+
+```tsx
+const exporter = useRef<GanttExportApi>(null);
+
+<GanttChart tasks={tasks} groups={groups} exportRef={exporter} />;
+
+// What is on screen.
+await exporter.current?.download({ filename: 'schedule.png' });
+
+// Every row and the whole time domain, 2 400 px wide.
+const { canvas, width, height, bars } = exporter.current!.toCanvas({
+  scope: 'full',
+  width: 2400,
+});
+```
+
+Four endings — `toCanvas`, `toDataURL`, `toBlob`, `download` — over the same
+options. Defaults follow the component's own chrome props, so an export looks like
+the widget it came from; `exportOptions` changes those defaults and any call can
+override them. The full list is in
+[`@gantt-chart/echarts`](../gantt-echarts/README.md#png-export), along with what
+the exporter does and does not put in the image.
+
+The plot is re-rendered rather than screenshotted, so a `'full'` export can be a
+different size and time window than the live view **without moving it** — no pan
+and restore, and no `onViewportChange` while it happens. Interaction state
+(marquee, drag ghost, hover) is left out; selection is kept.
+
+`useGanttExport({ engine, theme, … })` is the same exporter for a custom shell,
+and returns a stable object safe to hand to a memoized toolbar.
+
 ## Composition
 
 `GanttChart` is an assembly, not a monolith. The engine owns state and geometry,
@@ -115,7 +149,8 @@ const viewport = useEngineState(engine, (state) => state.viewport, shallowEqual)
 
 Hooks: `useGanttEngine` (owns the engine and syncs props),
 `useEngineState(engine, selector, isEqual?)` (subscribe to a slice),
-`useEngineVersion`, `useElementSize`, `useNativeWheel`.
+`useGanttExport` (PNG export), `useEngineVersion`, `useElementSize`,
+`useNativeWheel`.
 
 ## Notes
 

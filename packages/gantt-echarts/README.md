@@ -96,6 +96,60 @@ milliseconds — day boundaries stay at local midnight across a DST change, and
 month bands keep their real lengths. Both the canvas grid and the React header use
 them, which is why grid lines and labels cannot drift apart.
 
+## PNG export
+
+```ts
+import { downloadGanttPng, renderGanttToCanvas } from '@gantt-chart/echarts';
+import * as echarts from 'echarts';
+
+// What is on screen.
+await downloadGanttPng({ engine, theme, echarts, filename: 'schedule.png' });
+
+// Every row and the whole time domain, 2 400 px wide, at 1×.
+const { canvas, width, height, bars } = renderGanttToCanvas({
+  engine,
+  theme,
+  echarts,
+  scope: 'full',
+  width: 2400,
+  pixelRatio: 1,
+});
+```
+
+`ganttToPngDataURL` and `ganttToPngBlob` are the other two endings; all four take
+the same input.
+
+The plot is *re-rendered* into a throw-away instance and read back through
+zrender's painter (`getZr().painter.getRenderedCanvas()` — the internal call
+ECharts' own `getDataURL` is built on), then the header and gutter are drawn onto
+the result from the same `computeTimeHeader` / `computeAxisRows` models the React
+chrome uses. Three things follow from re-rendering rather than screenshotting:
+
+- the image is independent of the on-screen size, of the device pixel ratio, and
+  of the live renderer being `svg`;
+- marquee, drag ghost and hover highlight are left out, while selection — state a
+  reader set on purpose — is kept;
+- **the engine is not moved.** A `full` export needs a different viewport than the
+  one on screen and gets a substituted one, so there is no pan-and-restore, no
+  store write and no `viewport:change` for the application to see.
+
+| option | default |
+| --- | --- |
+| `scope` | `'viewport'`; `'full'` for every row and the whole domain |
+| `width` / `height` | the live plot size (`full` height is what every row needs) |
+| `timeRange` | whatever `scope` chose |
+| `pixelRatio` | `2`, reduced if the canvas would exceed the limits |
+| `background` | the theme's; `'transparent'` leaves it unpainted |
+| `showHeader` / `showRowGutter` / `gutterWidth` / `showGrid` / `showRowBands` | as the widget draws them |
+| `padding` | `0` |
+| `maxItems` | `50 000`; `truncated` reports when it bites |
+| `maxDimension` / `maxPixels` | `16 384` px per side, `32 000 000` px total |
+
+Content is never cropped to make an export fit: the pixel ratio gives way first,
+and an image that will not fit even at 1× throws rather than silently losing rows.
+`planGanttExport` returns everything an export is made of without painting
+anything, which is the seam for a different painter (or a test).
+
 ## Dependency arrows
 
 ```ts

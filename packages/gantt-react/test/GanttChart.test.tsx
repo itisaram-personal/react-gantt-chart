@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GanttTask, TaskChange } from '@gantt-chart/core';
 import { darkTheme, lightTheme } from '@gantt-chart/themes';
+import type { GanttExportApi } from '../src/useGanttExport';
 import { DAY, PLOT_HEIGHT, PLOT_WIDTH, T0, dispatch, drag, fixtureData, key, plotOf, renderChart, run, textsOf } from './dom';
 
 /**
@@ -937,3 +939,44 @@ describe('interactive header labels', () => {
   });
 });
 
+
+describe('png export', () => {
+  it('hands over an exporter, and takes it back on unmount', () => {
+    const { tasks, groups } = fixtureData();
+    const ref = createRef<GanttExportApi>();
+    const harness = mount({ tasks, groups, exportRef: ref });
+
+    const exporter = ref.current;
+    expect(typeof exporter?.toCanvas).toBe('function');
+    expect(typeof exporter?.toDataURL).toBe('function');
+    expect(typeof exporter?.toBlob).toBe('function');
+    expect(typeof exporter?.download).toBe('function');
+
+    harness.unmount();
+    expect(ref.current).toBeNull();
+  });
+
+  it('keeps the exporter stable across re-renders, so a toolbar can memoize it', () => {
+    const { tasks, groups } = fixtureData();
+    const ref = createRef<GanttExportApi>();
+    const harness = mount({ tasks, groups, exportRef: ref });
+
+    const first = ref.current;
+    harness.rerender({ theme: darkTheme });
+    expect(ref.current).toBe(first);
+  });
+
+  it('fails loudly where there is no canvas to paint on', () => {
+    /*
+     * jsdom implements no canvas, so a real image cannot be produced here — the
+     * point of the case is that the attempt reaches the painting step (planning,
+     * option building and the throw-away chart all run) and then reports the
+     * missing canvas instead of handing back a blank PNG.
+     */
+    const { tasks, groups } = fixtureData();
+    const ref = createRef<GanttExportApi>();
+    mount({ tasks, groups, exportRef: ref });
+
+    expect(() => ref.current?.toCanvas()).toThrow();
+  });
+});
