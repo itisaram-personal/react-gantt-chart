@@ -745,8 +745,9 @@ describe('render scheduling', () => {
     const { adapter, engine } = setup();
     const ticks = adapter.getTicks();
     // 10 days across 800px leaves ~1.1 days per 88px of target spacing, so the
-    // next nice step up from a day is a week.
-    expect(ticks.unit).toBe('week');
+    // first rung of the ladder that clears it is a 3-day step.
+    expect(ticks.unit).toBe('day');
+    expect(ticks.step).toBe(3);
     expect(ticks.ticks.length).toBeGreaterThan(0);
     expect(ticks.ticks[0].time).toBeGreaterThanOrEqual(engine.viewport.state.timeStart);
   });
