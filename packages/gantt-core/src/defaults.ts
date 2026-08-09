@@ -13,6 +13,7 @@ export const defaultOptions: GanttEngineOptions = {
     itemPaddingY: 3,
     minRowHeight: 34,
     minItemWidth: 2,
+    uniformRowHeight: true,
   },
   stacking: {
     enabled: true,
@@ -84,7 +85,8 @@ export function affectsLayout(previous: GanttEngineOptions, next: GanttEngineOpt
     a.laneHeight !== b.laneHeight ||
     a.rowPaddingY !== b.rowPaddingY ||
     a.minRowHeight !== b.minRowHeight ||
-    a.itemPaddingY !== b.itemPaddingY
+    a.itemPaddingY !== b.itemPaddingY ||
+    a.uniformRowHeight !== b.uniformRowHeight
   ) {
     return true;
   }

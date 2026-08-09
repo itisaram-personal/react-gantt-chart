@@ -47,6 +47,7 @@ export function App(): JSX.Element {
   const [maxLanes, setMaxLanes] = useState(64);
   const [dark, setDark] = useState(true);
   const [stacking, setStacking] = useState(true);
+  const [uniformRows, setUniformRows] = useState(false);
   const [rollup, setRollup] = useState(true);
   const [snapMs, setSnapMs] = useState(0);
   const [showDependencies, setShowDependencies] = useState(true);
@@ -90,13 +91,14 @@ export function App(): JSX.Element {
 
   const options: DeepPartial<GanttEngineOptions> = useMemo(
     () => ({
+      metrics: { uniformRowHeight: uniformRows },
       stacking: { enabled: stacking, rollupCollapsed: rollup, maxLanes },
       interaction: {
         snapMs,
         backgroundDrag: { alt: "pan", plain: "pan", ctrl: "marquee", shift: "marquee" },
       },
     }),
-    [stacking, rollup, maxLanes, snapMs],
+    [stacking, uniformRows, rollup, maxLanes, snapMs],
   );
 
   /** Colour by status instead of by group — the same hook a consumer would use. */
@@ -303,6 +305,12 @@ export function App(): JSX.Element {
 
         <Toggle label="Dark" checked={dark} onChange={setDark} />
         <Toggle label="Stacking" checked={stacking} onChange={setStacking} />
+        <Toggle
+          label="Equal rows"
+          checked={uniformRows}
+          onChange={setUniformRows}
+          title="Same height for every row; only overlapping bars shrink to fit"
+        />
         <Toggle
           label="Roll up"
           checked={rollup}

@@ -56,6 +56,7 @@ export function resolveRows<T, G>(
         y: 0,
         height: 0,
         laneCount: 1,
+        laneHeight: 0,
         laneOffset: 0,
         hasChildren,
         collapsed: isCollapsed,

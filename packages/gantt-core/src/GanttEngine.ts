@@ -3,7 +3,7 @@ import { affectsLayout, resolveOptions, defaultOptions, DAY } from './defaults';
 import { ContextMenuEngine } from './engine/contextMenu';
 import type { EngineContext } from './engine/context';
 import { DragEngine } from './engine/drag';
-import { computeLayout, laneTop, nearestRowIndex, rowIndexAt } from './engine/layout';
+import { barInset, computeLayout, laneTop, nearestRowIndex, rowIndexAt } from './engine/layout';
 import { resolveRows, type RowModel } from './engine/rows';
 import { SelectionEngine } from './engine/selection';
 import { ViewportController } from './engine/viewport';
@@ -346,10 +346,14 @@ export class GanttEngine<T = unknown, G = unknown> {
     if (rowIndex < 0) return result;
 
     const row = layout.rows[rowIndex];
-    const { laneHeight, minItemWidth } = this.options.metrics;
-    const lane = Math.floor((contentY - row.y - row.laneOffset) / laneHeight);
-    if (lane < 0 || lane >= row.laneCount) return result;
-    result.lane = lane;
+    const { minItemWidth } = this.options.metrics;
+    // Offset into the row's lane band. Every cluster fills the same band, so
+    // this bounds check is shared even though lane heights differ inside it.
+    const laneY = contentY - row.y - row.laneOffset;
+    const band = row.laneCount * row.laneHeight;
+    if (laneY < 0 || laneY >= band) return result;
+    // Reported for empty space; a hit below replaces it with the bar's own lane.
+    result.lane = Math.min(row.laneCount - 1, Math.floor(laneY / row.laneHeight));
 
     // Short bars are widened to `minItemWidth` on screen, so hit-testing has to
     // use the same tolerance in time space.
@@ -363,11 +367,14 @@ export class GanttEngine<T = unknown, G = unknown> {
     for (let rank = hi; rank >= from; rank--) {
       if (layout.maxEndPrefix[rank] < time - tolerance) break;
       const taskIndex = layout.rankToTask[rank];
-      if (layout.taskLane[taskIndex] !== lane) continue;
+      const laneHeight = layout.taskLaneHeight[taskIndex];
+      const top = layout.taskLane[taskIndex] * laneHeight;
+      if (laneY < top || laneY >= top + laneHeight) continue;
       const end = Math.max(this.model.ends[taskIndex], this.model.starts[taskIndex] + tolerance);
       if (end >= time) {
         result.task = this.model.tasks[taskIndex];
         result.taskIndex = taskIndex;
+        result.lane = layout.taskLane[taskIndex];
         return result;
       }
     }
@@ -389,15 +396,17 @@ export class GanttEngine<T = unknown, G = unknown> {
     const rowIndex = layout.taskRow[index];
     if (rowIndex < 0) return null;
 
-    const { laneHeight, itemPaddingY, minItemWidth } = this.options.metrics;
+    const { itemPaddingY, minItemWidth } = this.options.metrics;
     const row = layout.rows[rowIndex];
+    const laneHeight = layout.taskLaneHeight[index];
+    const inset = barInset(laneHeight, itemPaddingY);
     const x = this.viewport.timeToPx(this.model.starts[index]);
     const right = this.viewport.timeToPx(this.model.ends[index]);
     return {
       x,
       width: Math.max(minItemWidth, right - x),
-      y: this.viewport.contentToPx(laneTop(row, layout.taskLane[index], laneHeight) + itemPaddingY),
-      height: Math.max(1, laneHeight - itemPaddingY * 2),
+      y: this.viewport.contentToPx(laneTop(row, layout.taskLane[index], laneHeight) + inset),
+      height: Math.max(1, laneHeight - inset * 2),
     };
   }
 

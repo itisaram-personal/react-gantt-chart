@@ -80,6 +80,9 @@ export function computeLayout<T, G>(
   const maxLanes = Math.max(1, stacking.maxLanes | 0);
   const minGap = stacking.minGap;
   const rowLaneCount = new Int32Array(rowCount);
+  // Scratch: each task's *cluster* lane count. The row geometry pass below
+  // turns it into the pixel lane height the bar is actually drawn at.
+  const taskLaneHeight = new Float64Array(taskCount);
 
   for (let r = 0; r < rowCount; r++) {
     const from = rowOffsets[r];
@@ -92,6 +95,11 @@ export function computeLayout<T, G>(
     allocator.reset();
     let runningMax = -Infinity;
     let lanes = 1;
+    // A cluster is a maximal run of tasks joined by overlap. Tracked separately
+    // from `runningMax` because floating tasks are outside overlap detection.
+    let clusterEnd = -Infinity;
+    let clusterFrom = from;
+    let clusterLanes = 1;
 
     for (let rank = from; rank < to; rank++) {
       const i = rankToTask[rank];
@@ -114,13 +122,27 @@ export function computeLayout<T, G>(
       // same instant do not share a lane.
       const busyUntil = end > starts[i] ? end : starts[i] + MILESTONE_EPSILON;
 
+      // Nothing before this task is still busy, so the stack starts over: a
+      // task that collides with nothing gets a cluster — and a row — to itself.
+      if (starts[i] - minGap >= clusterEnd) {
+        writeClusterLanes(taskLaneHeight, rankToTask, clusterFrom, rank, clusterLanes);
+        allocator.reset();
+        clusterFrom = rank;
+        clusterLanes = 1;
+      }
+      if (busyUntil > clusterEnd) clusterEnd = busyUntil;
+
       if (task.lane !== undefined) {
         taskLane[i] = allocator.occupy(task.lane, busyUntil, maxLanes);
       } else {
         taskLane[i] = allocator.allocate(starts[i] - minGap, busyUntil, maxLanes);
       }
+      if (taskLane[i] + 1 > clusterLanes) clusterLanes = taskLane[i] + 1;
       if (taskLane[i] + 1 > lanes) lanes = taskLane[i] + 1;
     }
+    // Closes the last cluster, and covers every task in a row that never
+    // reached the allocator (stacking off, or all floating).
+    writeClusterLanes(taskLaneHeight, rankToTask, clusterFrom, to, clusterLanes);
 
     rowLaneCount[r] = stacking.enabled ? Math.max(1, lanes) : 1;
   }
@@ -130,18 +152,44 @@ export function computeLayout<T, G>(
   const rowHeight = new Float64Array(rowCount);
   let y = 0;
 
+  // In uniform mode every row is as tall as a single-lane row would be, and
+  // deeper stacks are absorbed by thinner lanes rather than a taller row.
+  const uniformHeight = metrics.uniformRowHeight
+    ? Math.max(metrics.minRowHeight, metrics.laneHeight + metrics.rowPaddingY * 2)
+    : 0;
+
   for (let r = 0; r < rowCount; r++) {
     const row = rows[r] as GanttRow<G>;
     const laneCount = rowLaneCount[r];
-    const content = laneCount * metrics.laneHeight;
-    const natural = content + metrics.rowPaddingY * 2;
-    const height = row.group.height ?? Math.max(metrics.minRowHeight, natural);
+
+    let height: number;
+    let laneHeight: number;
+    if (uniformHeight > 0) {
+      height = row.group.height ?? uniformHeight;
+      laneHeight = Math.max(1, height - metrics.rowPaddingY * 2) / laneCount;
+    } else {
+      laneHeight = metrics.laneHeight;
+      const natural = laneCount * laneHeight + metrics.rowPaddingY * 2;
+      height = row.group.height ?? Math.max(metrics.minRowHeight, natural);
+    }
+    const content = laneCount * laneHeight;
 
     row.laneCount = laneCount;
+    row.laneHeight = laneHeight;
     row.y = y;
     row.height = height;
     // Lanes are centred when the row is taller than the stack needs.
     row.laneOffset = Math.max(metrics.rowPaddingY, (height - content) / 2);
+
+    // Cluster lane counts → pixels. Uniform rows divide the same band between
+    // however many lanes *that cluster* needs, so an isolated bar fills the row
+    // while a three-deep pile-up gets a third each. Growing rows keep one
+    // height for every bar — the row already grew to make room.
+    const available = uniformHeight > 0 ? Math.max(1, height - metrics.rowPaddingY * 2) : 0;
+    for (let rank = rowOffsets[r]; rank < rowOffsets[r + 1]; rank++) {
+      const i = rankToTask[rank];
+      taskLaneHeight[i] = uniformHeight > 0 ? available / taskLaneHeight[i] : laneHeight;
+    }
 
     rowY[r] = y;
     rowHeight[r] = height;
@@ -155,6 +203,7 @@ export function computeLayout<T, G>(
     totalHeight: y,
     taskRow,
     taskLane,
+    taskLaneHeight,
     taskRank,
     rankToTask,
     rowOffsets,
@@ -163,9 +212,35 @@ export function computeLayout<T, G>(
   };
 }
 
-/** Top edge of a lane within a row, in content pixels. */
-export function laneTop(row: GanttRow, lane: number, laneHeight: number): number {
+/** Stamps a finished cluster's lane count onto each of its tasks. */
+function writeClusterLanes(
+  taskLaneHeight: Float64Array,
+  rankToTask: Int32Array,
+  from: number,
+  to: number,
+  lanes: number,
+): void {
+  for (let rank = from; rank < to; rank++) taskLaneHeight[rankToTask[rank]] = lanes;
+}
+
+/**
+ * Top edge of a lane within a row, in content pixels.
+ *
+ * `laneHeight` defaults to the row's own lane height, which is the one that
+ * accounts for uniform rows; pass it only to measure against a different scale.
+ */
+export function laneTop(row: GanttRow, lane: number, laneHeight: number = row.laneHeight): number {
   return row.y + row.laneOffset + lane * laneHeight;
+}
+
+/**
+ * Inset of a bar inside its lane, px.
+ *
+ * Capped at a quarter of the lane so a compressed stack still renders bars
+ * rather than collapsing into padding.
+ */
+export function barInset(laneHeight: number, itemPaddingY: number): number {
+  return Math.min(itemPaddingY, laneHeight / 4);
 }
 
 /**

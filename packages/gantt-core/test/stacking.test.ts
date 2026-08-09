@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GanttEngine } from '../src/GanttEngine';
+import { barInset } from '../src/engine/layout';
 import { LaneAllocator } from '../src/util/laneAllocator';
 import type { GanttTask } from '../src/types';
 import { generate, mulberry32 } from './helpers';
@@ -197,5 +198,180 @@ describe('stacking through the engine', () => {
     }
 
     expect(engine.getLayout().rows[0].laneCount).toBe(peak);
+  });
+});
+
+describe('uniform row heights', () => {
+  /** Row 'flat' takes one lane, row 'stacked' takes three. */
+  const TASKS: GanttTask[] = [
+    { id: 'a', groupId: 'flat', start: 0, end: 10 },
+    { id: 'b', groupId: 'flat', start: 10, end: 20 },
+    { id: 'c', groupId: 'stacked', start: 0, end: 100 },
+    { id: 'd', groupId: 'stacked', start: 10, end: 100 },
+    { id: 'e', groupId: 'stacked', start: 20, end: 100 },
+  ];
+
+  const uniform = (): GanttEngine =>
+    new GanttEngine({
+      tasks: TASKS,
+      size: { width: 1000, height: 400 },
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: true } },
+    });
+
+  it('gives every row the same height and divides the lanes out of it', () => {
+    const engine = uniform();
+    const { laneHeight, rowPaddingY, minRowHeight } = engine.getOptions().metrics;
+    const expected = Math.max(minRowHeight, laneHeight + rowPaddingY * 2);
+    const layout = engine.getLayout();
+
+    expect(layout.rows.map((row) => row.height)).toEqual([expected, expected]);
+    expect(layout.totalHeight).toBe(expected * 2);
+
+    const [flat, stacked] = layout.rows;
+    expect(flat.laneCount).toBe(1);
+    expect(stacked.laneCount).toBe(3);
+    // Same usable space, three ways: a third of the lane height each.
+    expect(stacked.laneHeight).toBeCloseTo(flat.laneHeight / 3);
+    expect(stacked.laneOffset).toBe(rowPaddingY);
+  });
+
+  it('shrinks stacked bars to fit and keeps them inside the row', () => {
+    const engine = uniform();
+    engine.viewport.setTimeRange(0, 100);
+    const layout = engine.getLayout();
+    const items = engine.getVisible().items;
+
+    const flatBar = items.find((item) => item.task.id === 'a')!;
+    const stackedBars = items.filter((item) => item.task.id !== 'a' && item.task.id !== 'b');
+    expect(stackedBars).toHaveLength(3);
+
+    for (const bar of stackedBars) {
+      expect(bar.height).toBeLessThan(flatBar.height);
+      const row = layout.rows[bar.rowIndex];
+      expect(bar.y).toBeGreaterThanOrEqual(row.y);
+      expect(bar.y + bar.height).toBeLessThanOrEqual(row.y + row.height);
+    }
+    // Lanes stay in order and do not overlap.
+    const tops = stackedBars.map((bar) => bar.y).sort((x, y) => x - y);
+    expect(tops[1]).toBeGreaterThanOrEqual(tops[0]);
+    expect(tops[2]).toBeGreaterThanOrEqual(tops[1]);
+  });
+
+  it('hit-tests the compressed lanes', () => {
+    const engine = uniform();
+    engine.viewport.setTimeRange(0, 100);
+    const row = engine.getLayout().rows[1];
+
+    for (const [lane, id] of [
+      [0, 'c'],
+      [1, 'd'],
+      [2, 'e'],
+    ] as const) {
+      // Middle of the lane, in plot pixels (scrollTop is 0).
+      const y = row.y + row.laneOffset + (lane + 0.5) * row.laneHeight;
+      const hit = engine.hitTest({ x: 500, y });
+      expect(hit.lane).toBe(lane);
+      expect(hit.task?.id).toBe(id);
+    }
+  });
+
+  it('only shrinks bars that actually collide with something', () => {
+    const tasks: GanttTask[] = [
+      // A three-deep pile-up, then a task on its own further along the row.
+      { id: 'c', groupId: 'mixed', start: 0, end: 100 },
+      { id: 'd', groupId: 'mixed', start: 10, end: 100 },
+      { id: 'e', groupId: 'mixed', start: 20, end: 100 },
+      { id: 'alone', groupId: 'mixed', start: 200, end: 300 },
+    ];
+    const engine = new GanttEngine({
+      tasks,
+      size: { width: 1000, height: 400 },
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: true } },
+    });
+    engine.viewport.setTimeRange(0, 300);
+
+    const layout = engine.getLayout();
+    const row = layout.rows[0];
+    const available = row.laneCount * row.laneHeight;
+    const laneHeightOf = (id: string): number =>
+      layout.taskLaneHeight[engine.getDataModel().taskIndexById.get(id)!];
+
+    // The pile-up splits the band three ways; the loner keeps all of it.
+    expect(laneHeightOf('c')).toBeCloseTo(available / 3);
+    expect(laneHeightOf('alone')).toBeCloseTo(available);
+
+    const items = engine.getVisible().items;
+    const bar = (id: string): (typeof items)[number] => items.find((item) => item.task.id === id)!;
+    expect(bar('alone').height).toBeGreaterThan(bar('c').height);
+    expect(bar('alone').y).toBe(row.y + row.laneOffset + barInset(available, 3));
+    expect(bar('alone').y + bar('alone').height).toBeLessThanOrEqual(row.y + row.height);
+  });
+
+  it('treats a chain of overlaps as one cluster', () => {
+    // a–b overlap and b–c overlap, so all three share the row even though a and
+    // c never touch. Peak concurrency is 2, so each gets half the band.
+    const tasks: GanttTask[] = [
+      { id: 'a', groupId: 'g', start: 0, end: 10 },
+      { id: 'b', groupId: 'g', start: 5, end: 20 },
+      { id: 'c', groupId: 'g', start: 15, end: 25 },
+    ];
+    const engine = new GanttEngine({
+      tasks,
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: true } },
+    });
+    const layout = engine.getLayout();
+    const row = layout.rows[0];
+    const available = row.laneCount * row.laneHeight;
+
+    for (const id of ['a', 'b', 'c']) {
+      const index = engine.getDataModel().taskIndexById.get(id)!;
+      expect(layout.taskLaneHeight[index]).toBeCloseTo(available / 2);
+    }
+  });
+
+  it('hit-tests a full-height bar anywhere down the row', () => {
+    const tasks: GanttTask[] = [
+      { id: 'c', groupId: 'mixed', start: 0, end: 100 },
+      { id: 'd', groupId: 'mixed', start: 10, end: 100 },
+      { id: 'alone', groupId: 'mixed', start: 200, end: 300 },
+    ];
+    const engine = new GanttEngine({
+      tasks,
+      size: { width: 1000, height: 400 },
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: true } },
+    });
+    engine.viewport.setTimeRange(0, 300);
+    const row = engine.getLayout().rows[0];
+
+    // Bottom lane of the row: inside the loner, but in lane 1 of the pile-up.
+    const low = row.y + row.laneOffset + row.laneCount * row.laneHeight - 1;
+    expect(engine.hitTest({ x: 833, y: low }).task?.id).toBe('alone');
+    expect(engine.hitTest({ x: 100, y: low }).task?.id).toBe('d');
+    // Top lane at the same time still finds the other half of the pile-up.
+    const high = row.y + row.laneOffset + 1;
+    expect(engine.hitTest({ x: 100, y: high }).task?.id).toBe('c');
+  });
+
+  it('lets a group height override the uniform height', () => {
+    const engine = new GanttEngine({
+      tasks: TASKS,
+      groups: [{ id: 'flat' }, { id: 'stacked', height: 90 }],
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: true } },
+    });
+    const { rowPaddingY } = engine.getOptions().metrics;
+    const row = engine.getLayout().rows[1];
+
+    expect(row.height).toBe(90);
+    expect(row.laneHeight).toBeCloseTo((90 - rowPaddingY * 2) / 3);
+  });
+
+  it('leaves rows growing with the stack when the option is off', () => {
+    const engine = new GanttEngine({ tasks: TASKS, options: { minTimeSpan: 1 } });
+    const { laneHeight, rowPaddingY } = engine.getOptions().metrics;
+    const [flat, stacked] = engine.getLayout().rows;
+
+    expect(stacked.height).toBe(3 * laneHeight + rowPaddingY * 2);
+    expect(stacked.height).toBeGreaterThan(flat.height);
+    expect(stacked.laneHeight).toBe(laneHeight);
   });
 });

@@ -140,7 +140,8 @@ export class RenderContextBuilder<T = unknown, G = unknown> {
       clippedRight: x + width > this.viewport.width,
       rowY: row.y - this.viewport.scrollTop,
       rowHeight: row.height,
-      laneHeight: this.laneHeight,
+      // The bar's own lane, which is what a uniform row compresses per cluster.
+      laneHeight: item.laneHeight > 0 ? item.laneHeight : this.laneHeight,
       isMilestone: item.end === item.start,
     };
 

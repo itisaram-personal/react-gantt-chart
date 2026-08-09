@@ -9,7 +9,7 @@ import type {
   VisibleWindow,
   ViewportState,
 } from '../types';
-import { laneTop } from './layout';
+import { barInset, laneTop } from './layout';
 
 export interface VirtualizeInput<T, G> {
   model: DataModel<T, G>;
@@ -77,8 +77,6 @@ export function computeVisible<T, G>(input: VirtualizeInput<T, G>): VisibleWindo
 
   const starts = model.starts;
   const ends = model.ends;
-  const laneHeight = metrics.laneHeight;
-  const itemHeight = Math.max(1, laneHeight - metrics.itemPaddingY * 2);
   const limit = virtualization.maxVisibleItems;
 
   let candidateCount = 0;
@@ -106,7 +104,11 @@ export function computeVisible<T, G>(input: VirtualizeInput<T, G>): VisibleWindo
       }
     }
 
+    // Lane height is per task: in a uniform row only the bars that collide with
+    // something are compressed, so the lane is as tall as its cluster allows.
     const row = rows[effectiveRow];
+    const laneHeight = layout.taskLaneHeight[taskIndex];
+    const inset = barInset(laneHeight, metrics.itemPaddingY);
     items.push({
       taskIndex,
       task,
@@ -114,8 +116,9 @@ export function computeVisible<T, G>(input: VirtualizeInput<T, G>): VisibleWindo
       lane,
       start,
       end,
-      y: laneTop(row, lane, laneHeight) + metrics.itemPaddingY,
-      height: itemHeight,
+      y: laneTop(row, lane, laneHeight) + inset,
+      height: Math.max(1, laneHeight - inset * 2),
+      laneHeight,
       selected: selection.has(task.id),
       hovered: hoveredTaskId === task.id,
       dragging,
@@ -182,7 +185,12 @@ export function computeVisible<T, G>(input: VirtualizeInput<T, G>): VisibleWindo
   };
 }
 
-/** Task indices whose bars intersect a rectangle in content pixels / time. */
+/**
+ * Task indices whose bars intersect a rectangle in content pixels / time.
+ *
+ * `options` is unused — lane geometry now comes off the row — but kept so the
+ * signature stays source-compatible.
+ */
 export function queryRect<T, G>(
   model: DataModel<T, G>,
   layout: LayoutResult<G>,
@@ -201,7 +209,6 @@ export function queryRect<T, G>(
   if (rowStart < 0) rowStart = 0;
   const rowEnd = Math.min(rowCount - 1, lowerBoundIndex(layout.rowY, yEnd, 0, rowCount) - 1);
 
-  const laneHeight = options.metrics.laneHeight;
   const starts = model.starts;
   const ends = model.ends;
 
@@ -218,6 +225,7 @@ export function queryRect<T, G>(
       const taskIndex = layout.rankToTask[rank];
       if (ends[taskIndex] < timeStart) continue;
 
+      const laneHeight = layout.taskLaneHeight[taskIndex];
       const top = laneTop(row, layout.taskLane[taskIndex], laneHeight);
       if (top > yEnd || top + laneHeight < yStart) continue;
       result.push(taskIndex);

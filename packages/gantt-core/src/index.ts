@@ -16,7 +16,7 @@ export type { DataModel, NormalizeResult } from './data/dataModel';
 export { resolveRows } from './engine/rows';
 export type { RowModel } from './engine/rows';
 
-export { computeLayout, laneTop, rowIndexAt, nearestRowIndex } from './engine/layout';
+export { computeLayout, laneTop, barInset, rowIndexAt, nearestRowIndex } from './engine/layout';
 export { computeVisible, queryRect } from './engine/virtualize';
 export type { VirtualizeInput } from './engine/virtualize';
 

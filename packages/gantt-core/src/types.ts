@@ -79,6 +79,15 @@ export interface GanttRow<G = unknown> {
   height: number;
   /** Number of stacking lanes occupied by this row's tasks (>= 1). */
   laneCount: number;
+  /**
+   * Height of one lane at this row's *deepest* stack, px. Equal to
+   * {@link GanttMetrics.laneHeight} unless {@link GanttMetrics.uniformRowHeight}
+   * is on, where lanes are divided out of the fixed row height instead.
+   *
+   * Bars in shallower parts of the row are taller than this — see
+   * {@link LayoutResult.taskLaneHeight}.
+   */
+  laneHeight: number;
   /** Offset of lane 0 from the row's top edge, px. Lanes are centred in tall rows. */
   laneOffset: number;
   hasChildren: boolean;
@@ -98,6 +107,16 @@ export interface GanttMetrics {
   itemPaddingY: number;
   /** Rows never render shorter than this, px. */
   minRowHeight: number;
+  /**
+   * Give every row the same height instead of growing it with the stack.
+   *
+   * The shared height is `max(minRowHeight, laneHeight + 2 * rowPaddingY)` — the
+   * height a single-lane row would take — and the row is divided per *overlap
+   * cluster*, so a pile-up of four renders four thin bars while a bar that
+   * collides with nothing keeps the full row height. A `group.height` override
+   * still wins for that one row, with its clusters divided out of the override.
+   */
+  uniformRowHeight: boolean;
   /** Bars never render narrower than this, px (keeps short tasks clickable). */
   minItemWidth: number;
 }
@@ -283,6 +302,15 @@ export interface LayoutResult<G = unknown> {
   taskRow: Int32Array;
   /** Stacking lane per task index. */
   taskLane: Int32Array;
+  /**
+   * Height of the lane each task is drawn in, px, per task index.
+   *
+   * Equal to {@link GanttMetrics.laneHeight} everywhere unless
+   * {@link GanttMetrics.uniformRowHeight} is on, where it is the row's usable
+   * height divided by the lanes the task's *overlap cluster* needs — so a bar
+   * that overlaps nothing keeps the full row height.
+   */
+  taskLaneHeight: Float64Array;
   /** Rank of each task in visual order (row order, then start time). */
   taskRank: Int32Array;
   /** Task index per visual rank — the inverse of `taskRank`. */
@@ -306,6 +334,8 @@ export interface VisibleItem<T = unknown> {
   /** Top edge in content px, including any in-flight drag offset. */
   y: number;
   height: number;
+  /** Height of the lane this bar sits in — its height plus the bar insets. */
+  laneHeight: number;
   selected: boolean;
   hovered: boolean;
   dragging: boolean;
