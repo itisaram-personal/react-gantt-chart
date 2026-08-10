@@ -237,6 +237,18 @@
   background: var(--gantt-row-hover);
 }
 
+/*
+ * A disabled row. Muted rather than hidden, matching the faded bars the plot
+ * draws for it — the row is still there, it just takes no input.
+ */
+.gantt-gutter__row.is-disabled .gantt-gutter__label {
+  color: var(--gantt-text-muted);
+}
+
+.gantt-gutter__row.is-disabled .gantt-gutter__text {
+  font-style: italic;
+}
+
 .gantt-gutter__label {
   display: flex;
   align-items: center;
@@ -336,6 +348,62 @@
 /* Nothing hovers on a touch screen, so the button has to be there already. */
 @media (hover: none) {
   .gantt-gutter__menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/*
+ * The enable/disable button.
+ *
+ * Same reveal-on-hover rules as the options button beside it — see the comment
+ * there — with one addition: a row that is *off* keeps its button on screen
+ * permanently, because it is the only affordance that turns the row back on.
+ */
+.gantt-gutter__power {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--gantt-text-muted);
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.gantt-gutter__row:hover .gantt-gutter__power,
+.gantt-gutter__power:focus,
+.gantt-gutter__power:focus-visible,
+.gantt-gutter__power.is-off {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gantt-gutter__power:hover {
+  background: var(--gantt-row-selected);
+  color: var(--gantt-text);
+}
+
+/* Off reads as a state, not as a hover target, so it is coloured not filled. */
+.gantt-gutter__power.is-off {
+  color: var(--gantt-accent);
+}
+
+.gantt-gutter__power:focus-visible {
+  outline: 2px solid var(--gantt-accent);
+  outline-offset: -2px;
+}
+
+@media (hover: none) {
+  .gantt-gutter__power {
     opacity: 1;
     pointer-events: auto;
   }
@@ -489,16 +557,35 @@
 
 /* --------------------------------------------------------------- tooltip */
 
+/*
+ * The box is confined to the plot: the position is clamped in JS, which needs
+ * the size, and the size is capped here against the plot's own box — `100%` of
+ * the positioned `.gantt__plot-wrap`. Content that outgrows the cap scrolls
+ * inside the tooltip rather than spilling over the zoom bars.
+ */
 .gantt-tooltip {
   position: absolute;
   z-index: 20;
-  max-width: 280px;
+  max-width: min(280px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 6px 8px;
   border: 1px solid var(--gantt-border);
   border-radius: 4px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
-  pointer-events: none;
   white-space: nowrap;
+  /* Enterable: the pointer can reach the content, and select it. */
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* `interactive={false}`: a label again, with nothing to enter. */
+.gantt-tooltip.is-static {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .gantt-tooltip__title {

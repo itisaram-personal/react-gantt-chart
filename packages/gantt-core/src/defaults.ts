@@ -9,8 +9,11 @@ export const YEAR = 365 * DAY;
 export const defaultOptions: GanttEngineOptions = {
   metrics: {
     laneHeight: 26,
-    rowPaddingY: 4,
-    itemPaddingY: 3,
+    // Proportional rather than fixed: at the default row height these come to
+    // 4.1px and 3.1px — where the pixel defaults used to be — and they hold
+    // that proportion when rows are scaled to fit.
+    rowPaddingY: "12%",
+    itemPaddingY: "12%",
     minRowHeight: 34,
     minItemWidth: 2,
     uniformRowHeight: true,

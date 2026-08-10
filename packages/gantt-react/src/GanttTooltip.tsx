@@ -1,5 +1,13 @@
-import type { ReactNode } from 'react';
-import { shallowEqual, type GanttEngine, type GanttTask, type GanttTheme } from '@gantt-chart/core';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  shallowEqual,
+  type GanttEngine,
+  type GanttId,
+  type GanttTask,
+  type GanttTheme,
+  type Rect,
+  type ViewportState,
+} from '@gantt-chart/core';
 import { useEngineState } from './useEngineState';
 
 export interface GanttTooltipContext<T, G> {
@@ -16,10 +24,29 @@ export interface GanttTooltipProps<T, G> {
   render?: (context: GanttTooltipContext<T, G>) => ReactNode | null;
   /** Offset from the bar, px. */
   offset?: number;
+  /**
+   * Let the pointer into the tooltip, so its content can be hovered, selected
+   * and clicked — links and buttons in a custom body only work with this on.
+   * The tooltip then keeps itself open while the pointer is inside it, and for
+   * {@link closeDelay} ms either side of the gap between the bar and the box.
+   *
+   * On by default. Pass `false` for a tooltip that is only a label: it goes
+   * back to `pointer-events: none` and closes the instant the bar is left.
+   */
+  interactive?: boolean;
+  /** Grace period before an unhovered tooltip closes, ms. */
+  closeDelay?: number;
+}
+
+/** The hover the tooltip is currently showing, which outlives the hover itself. */
+interface HeldHover {
+  taskId: GanttId;
+  rowIndex: number | null;
 }
 
 /**
- * Hover tooltip, positioned from the engine's own geometry.
+ * Hover tooltip, positioned from the engine's own geometry and confined to the
+ * plot.
  *
  * Nothing is rendered while nothing is hovered, so the common case costs one
  * subscription and no DOM.
@@ -30,11 +57,14 @@ export function GanttTooltip<T, G>({
   locale,
   render,
   offset = 12,
+  interactive = true,
+  closeDelay = 160,
 }: GanttTooltipProps<T, G>): JSX.Element | null {
-  const { hoveredTaskId, dragging } = useEngineState(
+  const { hoveredTaskId, hoveredRowIndex, dragging } = useEngineState(
     engine,
     (state) => ({
       hoveredTaskId: state.hoveredTaskId,
+      hoveredRowIndex: state.hoveredRowIndex,
       // A tooltip following a dragged bar is noise.
       dragging: state.drag !== null && state.drag.active,
       viewport: state.viewport,
@@ -42,29 +72,165 @@ export function GanttTooltip<T, G>({
     shallowEqual,
   );
 
-  if (hoveredTaskId === null || dragging) return null;
+  /**
+   * What is on screen, which is not the same thing as what is hovered: an
+   * interactive tooltip has to survive the pointer crossing the gap between the
+   * bar and the box, and then stay up for as long as the pointer is inside it.
+   */
+  const [held, setHeld] = useState<HeldHover | null>(null);
+  const inside = useRef(false);
+  const closeTimer = useRef<number | null>(null);
+  // Read from the pointer handlers below, which outlive the render that made them.
+  const heldRef = useRef<HeldHover | null>(null);
+  heldRef.current = held;
 
-  const task = engine.getTask(hoveredTaskId);
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current === null) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  }, []);
+
+  const closeSoon = useCallback(() => {
+    if (closeTimer.current !== null) return;
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      inside.current = false;
+      setHeld(null);
+    }, closeDelay);
+  }, [closeDelay]);
+
+  useEffect(() => {
+    if (dragging) {
+      cancelClose();
+      inside.current = false;
+      setHeld(null);
+      return;
+    }
+    if (hoveredTaskId !== null) {
+      cancelClose();
+      setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+      return;
+    }
+    // The hover is gone. Without pointer events there is nowhere for it to have
+    // gone *to*, so the tooltip goes with it.
+    if (!interactive) {
+      cancelClose();
+      setHeld(null);
+      return;
+    }
+    if (!inside.current) closeSoon();
+  }, [hoveredTaskId, hoveredRowIndex, dragging, interactive, cancelClose, closeSoon]);
+
+  // Cancel a pending close on unmount, not on every dependency change.
+  useEffect(() => cancelClose, [cancelClose]);
+
+  /**
+   * Own size, measured rather than guessed — the content is the caller's, so
+   * there is no other way to know what has to fit. Measuring in a layout effect
+   * puts the corrected position on screen in the same frame as the first one.
+   */
+  const box = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const node = box.current;
+    const width = node ? node.offsetWidth : 0;
+    const height = node ? node.offsetHeight : 0;
+    if (width !== size.width || height !== size.height) setSize({ width, height });
+  });
+
+  /**
+   * The pointer's own handlers, attached to the node rather than declared as
+   * props. `wheel` has to be a native non-passive listener — React registers its
+   * own passively at the root, where `preventDefault` is ignored and the page
+   * scrolls instead — and enter/leave keep it company because React synthesizes
+   * those two from `pointerover`/`pointerout`, which is a layer of indirection
+   * this does not need.
+   *
+   * Not `useNativeWheel`: that attaches once, and this box comes and goes.
+   */
+  useEffect(() => {
+    const node = box.current;
+    if (!node || !interactive) return;
+
+    /*
+     * Entering re-asserts the hover the pointer left behind on the way in, so
+     * the bar stays emphasized and the row stays lit while the tooltip is being
+     * read. Leaving hands both back: the engine forgets the hover, and the
+     * countdown takes the tooltip with it unless another bar catches it first.
+     */
+    const enter = (): void => {
+      inside.current = true;
+      cancelClose();
+      if (heldRef.current) engine.setHovered(heldRef.current.taskId, heldRef.current.rowIndex);
+    };
+    const leave = (): void => {
+      inside.current = false;
+      engine.setHovered(null, null);
+      closeSoon();
+    };
+
+    /*
+     * An enterable tooltip sits between the pointer and the plot, so the wheel
+     * would stop scrolling and zooming the moment one opened under the cursor.
+     * Hand the event on to whatever is behind the box — the plot, in practice —
+     * so the chart behaves as though the tooltip were not in the way.
+     */
+    const forward = (event: WheelEvent): void => {
+      if (typeof document.elementsFromPoint !== 'function') return;
+      const behind = document
+        .elementsFromPoint(event.clientX, event.clientY)
+        .find((element) => !node.contains(element));
+      if (!behind) return;
+      event.preventDefault();
+      behind.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaX: event.deltaX,
+          deltaY: event.deltaY,
+          deltaZ: event.deltaZ,
+          deltaMode: event.deltaMode,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    };
+
+    node.addEventListener('pointerenter', enter);
+    node.addEventListener('pointerleave', leave);
+    node.addEventListener('wheel', forward, { passive: false });
+    return () => {
+      node.removeEventListener('pointerenter', enter);
+      node.removeEventListener('pointerleave', leave);
+      node.removeEventListener('wheel', forward);
+    };
+    // Re-attached whenever the box comes or goes; `held` is read through its ref.
+  }, [engine, interactive, held !== null, cancelClose, closeSoon]);
+
+  if (held === null || dragging) return null;
+
+  const task = engine.getTask(held.taskId);
   if (!task) return null;
-  const rect = engine.getTaskRect(hoveredTaskId);
+  const rect = engine.getTaskRect(held.taskId);
   if (!rect) return null;
 
   const content = render ? render({ task, engine, locale }) : defaultContent(task, locale);
   if (content === null || content === undefined) return null;
 
-  const viewport = engine.viewport.state;
-  // Flip to the left of the bar when there is no room on the right.
-  const preferredLeft = rect.x + rect.width + offset;
-  const flip = preferredLeft > viewport.width * 0.75;
+  const position = place(rect, size, engine.viewport.state, offset);
 
   return (
     <div
-      className="gantt-tooltip"
+      ref={box}
+      className={`gantt-tooltip${interactive ? '' : ' is-static'}`}
       role="tooltip"
       style={{
-        left: flip ? undefined : preferredLeft,
-        right: flip ? Math.max(0, viewport.width - rect.x + offset) : undefined,
-        top: Math.max(0, Math.min(rect.y - 4, viewport.height - 60)),
+        left: position.x,
+        top: position.y,
         background: theme.dark ? theme.colors.rowOdd : theme.colors.background,
         color: theme.colors.text,
         borderColor: theme.colors.border,
@@ -74,6 +240,36 @@ export function GanttTooltip<T, G>({
       {content}
     </div>
   );
+}
+
+/**
+ * Where the box goes: right of the bar when it fits there, left of it when that
+ * is where the room is, and against the nearer edge when neither side has any.
+ * Both axes are then clamped to the plot, so a tooltip on the last row or the
+ * far right stays inside the chart instead of hanging over the zoom bars.
+ *
+ * `size` is zero for the first render of a given tooltip, before the layout
+ * effect has measured it: that pass lands on the preferred side unclamped, and
+ * the measured one replaces it before the browser paints.
+ */
+function place(
+  rect: Rect,
+  size: { width: number; height: number },
+  viewport: ViewportState,
+  offset: number,
+): { x: number; y: number } {
+  const right = rect.x + rect.width + offset;
+  const left = rect.x - offset - size.width;
+  const preferred = right + size.width <= viewport.width ? right : left >= 0 ? left : right;
+
+  return {
+    x: clamp(preferred, 0, Math.max(0, viewport.width - size.width)),
+    y: clamp(rect.y - 4, 0, Math.max(0, viewport.height - size.height)),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
 }
 
 function defaultContent(task: GanttTask<unknown>, locale?: string): ReactNode {

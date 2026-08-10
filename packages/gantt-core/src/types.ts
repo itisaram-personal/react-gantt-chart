@@ -36,6 +36,12 @@ export interface GanttGroup<G = unknown> {
   parentId?: GanttId | null;
   /** Initial collapsed state; runtime state lives in the store. */
   collapsed?: boolean;
+  /**
+   * Initial disabled state; runtime state lives in the store, exactly like
+   * {@link GanttGroup.collapsed}. See {@link GanttRow.disabled} for what a
+   * disabled row ignores.
+   */
+  disabled?: boolean;
   /** Fixed row height in px. Overrides the lane-derived height. */
   height?: number;
   data?: G;
@@ -92,26 +98,72 @@ export interface GanttRow<G = unknown> {
   laneOffset: number;
   hasChildren: boolean;
   collapsed: boolean;
+  /**
+   * The row is inert: its bars ignore every data interaction — selection,
+   * click and double-click events, drag, resize, marquee and hover — and no
+   * drag may drop a task onto it.
+   *
+   * View-level controls keep working, so a disabled row can still be
+   * collapsed, right-clicked and re-enabled. Programmatic APIs
+   * (`selection.set`, `applyChanges`, …) are not gated either: this is an
+   * input rule, not a data lock.
+   *
+   * Unlike {@link GanttRow.collapsed} it changes nothing about geometry, so
+   * toggling it never re-runs stacking or layout.
+   */
+  disabled: boolean;
 }
 
 /* ------------------------------------------------------------------ *
  * Options
  * ------------------------------------------------------------------ */
 
+/**
+ * A vertical length: a number of pixels, or a percentage of the box it sits in
+ * — `'12%'`.
+ *
+ * A percentage keeps its proportion when the box is resized, which is what
+ * makes a chart look the same at any row height: shrink rows to fit a hundred
+ * of them on screen and the padding shrinks with them, instead of a fixed 4px
+ * swallowing a 6px row.
+ *
+ * Percentages are clamped to 45% a side, so padding can never consume the box
+ * it is measured against.
+ */
+export type GanttLength = number | `${number}%`;
+
 export interface GanttMetrics {
   /** Height of one stacking lane, px. */
   laneHeight: number;
-  /** Vertical padding between the row edge and the first/last lane, px. */
-  rowPaddingY: number;
-  /** Inset of the bar inside its lane, px. */
-  itemPaddingY: number;
+  /**
+   * Vertical padding between the row edge and the first/last lane.
+   *
+   * A percentage is measured against the **row height** — so it stays a
+   * constant share of the row however tall the row becomes, and every row in a
+   * uniform-height chart gets the same inset whatever its stack depth.
+   */
+  rowPaddingY: GanttLength;
+  /**
+   * Inset of the bar inside its lane.
+   *
+   * A percentage is measured against the **lane height** — the bar's own lane,
+   * which in a uniform row is what the overlap cluster left it. So a bar that
+   * collides with nothing is inset proportionally more than one squeezed into a
+   * four-deep pile-up, rather than both losing the same fixed pixels.
+   *
+   * Capped at a quarter of the lane either way, so a compressed stack still
+   * renders bars instead of collapsing into padding.
+   */
+  itemPaddingY: GanttLength;
   /** Rows never render shorter than this, px. */
   minRowHeight: number;
   /**
    * Give every row the same height instead of growing it with the stack.
    *
-   * The shared height is `max(minRowHeight, laneHeight + 2 * rowPaddingY)` — the
-   * height a single-lane row would take — and the row is divided per *overlap
+   * The shared height is the height a single-lane row would take, floored by
+   * `minRowHeight` — `laneHeight + 2 * rowPaddingY` in pixels, or
+   * `laneHeight / (1 - 2 * ratio)` when the padding is a percentage of the row
+   * — and the row is divided per *overlap
    * cluster*, so a pile-up of four renders four thin bars while a bar that
    * collides with nothing keeps the full row height. A `group.height` override
    * still wins for that one row, with its clusters divided out of the override.
@@ -387,6 +439,7 @@ export interface GanttEventMap<T = unknown, G = unknown> {
   "row:dblclick": { row: GanttRow<G>; position: Point };
   "row:contextmenu": { row: GanttRow<G>; position: Point };
   "row:toggle": { row: GanttRow<G>; collapsed: boolean };
+  "row:disable": { row: GanttRow<G>; disabled: boolean };
   "contextmenu:open": ContextMenuState<T, G>;
   "contextmenu:close": void;
   "options:change": GanttEngineOptions;

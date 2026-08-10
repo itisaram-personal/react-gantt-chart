@@ -190,6 +190,14 @@ function defaultItems<T, G>(
     });
   }
 
+  if (menu.row) {
+    items.push({
+      id: 'toggle-row-disabled',
+      label: menu.row.disabled ? 'Enable row' : 'Disable row',
+      onSelect: () => engine.toggleRowDisabled(menu.row!.group.id),
+    });
+  }
+
   if (items.length > 0) items.push({ id: 'sep-1', separator: true });
 
   items.push(
@@ -227,6 +235,12 @@ function defaultRowItems<T, G>(row: GanttRow<G>, engine: GanttEngine<T, G>): Gan
     });
   }
 
+  items.push({
+    id: 'toggle-row-disabled',
+    label: row.disabled ? 'Enable row' : 'Disable row',
+    onSelect: () => engine.toggleRowDisabled(row.group.id),
+  });
+
   const tasks = engine.getTasks();
   const indices = taskIndicesInRow(engine, row);
   const empty = indices.length === 0;
@@ -235,7 +249,9 @@ function defaultRowItems<T, G>(row: GanttRow<G>, engine: GanttEngine<T, G>): Gan
     {
       id: 'select-row',
       label: empty ? 'Select tasks in row' : `Select ${indices.length} task${indices.length === 1 ? '' : 's'}`,
-      disabled: empty,
+      // Selecting into a disabled row would hand back exactly the interaction
+      // the row opted out of.
+      disabled: empty || row.disabled,
       onSelect: () => engine.selection.set(indices.map((index) => tasks[index].id)),
     },
     {

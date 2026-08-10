@@ -308,7 +308,9 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     const modifiers = modifiersOf(event);
     const hit = this.engine.hitTest(point);
 
-    if (hit.task) {
+    // A bar on a disabled row is not a target: the press falls through to the
+    // background gesture, so panning and marqueeing still work over the row.
+    if (hit.task && !hit.row?.disabled) {
       const taskId = hit.task.id;
       const wasSelected = this.engine.selection.isSelected(taskId);
       // Selecting on press (not release) is what lets the same gesture drag the
@@ -379,7 +381,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       this.engine.selection.clear();
     }
     const row = this.engine.nearestRow(point.y);
-    if (row) {
+    if (row && !row.disabled) {
       this.engine.events.emit('row:click', { row, modifiers: modifiersOf(event), position: point });
     }
   }
@@ -403,8 +405,12 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       }
       default: {
         const hit = this.engine.hitTest(point);
-        this.engine.setHovered(hit.task?.id ?? null, hit.rowIndex >= 0 ? hit.rowIndex : null);
-        this.updateCursor(hit.task?.id ?? null, point);
+        // The row still reports as hovered — that is what reveals its gutter
+        // controls — but nothing on it is a hover target, so no tooltip, no
+        // emphasis and no grab cursor.
+        const taskId = hit.row?.disabled ? null : (hit.task?.id ?? null);
+        this.engine.setHovered(taskId, hit.rowIndex >= 0 ? hit.rowIndex : null);
+        this.updateCursor(taskId, point);
       }
     }
   }
@@ -473,6 +479,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
   private onDoubleClick(event: MouseEvent): void {
     const point = this.pointFromEvent(event);
     const hit = this.engine.hitTest(point);
+    if (hit.row?.disabled) return;
     if (hit.task) {
       this.engine.events.emit('task:dblclick', { task: hit.task, position: point });
       return;
@@ -484,15 +491,18 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     event.preventDefault();
     const point = this.pointFromEvent(event);
     const hit = this.engine.hitTest(point);
+    // The menu still opens over a disabled row — it is the way back out — but
+    // it is about the row, never the bar under the pointer.
+    const task = hit.row?.disabled ? null : hit.task;
 
     this.engine.contextMenu.open({
-      kind: hit.task ? 'task' : hit.row ? 'row' : 'background',
+      kind: task ? 'task' : hit.row ? 'row' : 'background',
       position: point,
-      task: hit.task,
+      task,
       row: hit.row,
     });
 
-    if (hit.task) this.engine.events.emit('task:contextmenu', { task: hit.task, position: point });
+    if (task) this.engine.events.emit('task:contextmenu', { task, position: point });
     else if (hit.row) this.engine.events.emit('row:contextmenu', { row: hit.row, position: point });
   }
 

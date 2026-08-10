@@ -82,12 +82,33 @@ caps a row, `lane` pins a task, and `floating` exempts one from overlap entirely
 Milestones (`start === end`) are widened infinitesimally so two at the same
 instant do not share a lane.
 
+## Disabled rows
+
+`engine.setRowDisabled(groupId, true)` makes a row inert: its tasks are skipped
+by click semantics, ranges, marquee, select-all/invert and keyboard focus, no
+drag can begin on them or drop onto the row, and the row stops being a hover
+target. `group.disabled` seeds the state the way `group.collapsed` does, and
+`row:disable` reports every change.
+
+It is an *input* rule. `selection.set`, `applyChanges` and every other explicit
+call still reach the row, and `hitTest` stays truthful about what is under a
+pixel — `result.row.disabled` is what tells a caller the hit is out of bounds.
+
+Because it changes no geometry, disabling sits outside the layout inputs: the
+row model and everything downstream of it are kept, and only `GanttRow.disabled`
+is re-stamped. Toggling a row in a 100 000-task chart therefore costs a walk of
+the row list, not a re-stack.
+
 ## Hit testing
 
 `hitTest(point)` answers what is under a pixel without scanning the dataset:
 binary search for the row, then for the last task starting before that time, then
 a short backwards scan bounded by `maxEndPrefix`. The same `minItemWidth`
 tolerance the renderer uses is applied, so a 1px bar is still clickable.
+
+`nearestRow(y)` and `getRow(groupId)` are the two ways in without a pixel: one
+from a coordinate, the other from a group — the latter follows collapse, so a
+hidden group reports the ancestor row its tasks roll up onto.
 
 ## Data notes
 

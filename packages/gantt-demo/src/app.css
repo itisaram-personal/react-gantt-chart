@@ -84,6 +84,17 @@ body {
   font: inherit;
 }
 
+.app__field input[type="date"] {
+  padding: 3px 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-panel);
+  color: inherit;
+  font: inherit;
+  /* Dark theme: the native picker glyph is black on black without this. */
+  color-scheme: inherit;
+}
+
 .app__buttons {
   display: inline-flex;
   gap: 6px;

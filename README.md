@@ -91,6 +91,10 @@ bars — the part that can number in the thousands — go through the canvas.
   optional roll-up of hidden descendants onto the nearest visible ancestor.
 - **Selection** — click, ctrl-click, shift-range over *visual* order, marquee,
   select-all/invert, keyboard navigation.
+- **Disabled rows** — a button after each y-axis label switches a row off: it
+  keeps its bars, faded, but ignores every interaction with them and is no
+  longer a drop target. Seed it with `group.disabled`, drive it with
+  `engine.setRowDisabled`.
 - **Background gesture** — a drag on empty space marquee-selects or pans,
   per modifier. `interaction.backgroundDrag` maps `plain`/`ctrl`/`shift`/`alt`
   to `'marquee' | 'pan' | 'none'`; the default pans on a plain drag and marquees

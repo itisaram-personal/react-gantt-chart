@@ -10,6 +10,8 @@ export interface AxisRowDescriptor<G = unknown> {
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
+  /** Mirrors {@link GanttRow.disabled}: the row's bars ignore input. */
+  disabled: boolean;
   label: string;
   /** Alternating band index, stable under scrolling. */
   odd: boolean;
@@ -40,6 +42,7 @@ export function computeAxisRows<G>(
       depth: row.depth,
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
+      disabled: row.disabled,
       label: row.group.label ?? String(row.group.id),
       odd: row.index % 2 === 1,
       fullyVisible: y >= 0 && y + row.height <= viewport.height,
@@ -55,6 +58,8 @@ export interface RowBand<G = unknown> {
   height: number;
   odd: boolean;
   hovered: boolean;
+  /** Mirrors {@link GanttRow.disabled}: the row's bars ignore input. */
+  disabled: boolean;
 }
 
 export function computeRowBands<G>(
@@ -70,7 +75,9 @@ export function computeRowBands<G>(
       y: row.y - viewport.scrollTop,
       height: row.height,
       odd: row.index % 2 === 1,
-      hovered: hoveredRowIndex === row.index,
+      // A disabled row is never the hover target, whatever the pointer is over.
+      hovered: hoveredRowIndex === row.index && !row.disabled,
+      disabled: row.disabled,
     });
   }
   return out;

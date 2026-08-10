@@ -3,8 +3,9 @@ import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GanttTask, TaskChange } from '@gantt-chart/core';
 import { darkTheme, lightTheme } from '@gantt-chart/themes';
+import type { GanttDragEndEvent } from '../src/GanttChart';
 import type { GanttExportApi } from '../src/useGanttExport';
-import { DAY, PLOT_HEIGHT, PLOT_WIDTH, T0, dispatch, drag, fixtureData, key, plotOf, renderChart, run, textsOf } from './dom';
+import { DAY, PLOT_HEIGHT, PLOT_WIDTH, T0, dispatch, drag, fixtureData, key, plotOf, renderChart, run, textsOf, wait } from './dom';
 
 /**
  * Geometry, with the layout stub in place (800×400 plot):
@@ -23,6 +24,25 @@ afterEach(() => {
   for (const harness of open.splice(0)) harness.unmount();
   vi.restoreAllMocks();
 });
+
+/**
+ * Give every element a border box, which jsdom otherwise reports as zero.
+ *
+ * `installLayout` stubs the plot's size; this is for the one place that measures
+ * *itself* — the tooltip, which is positioned from its own width and height.
+ */
+function stubBox(width: number, height: number): () => void {
+  const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
+  const define = (name: string, value: number): void => {
+    Object.defineProperty(proto, name, { configurable: true, get: () => value });
+  };
+  define('offsetWidth', width);
+  define('offsetHeight', height);
+  return () => {
+    delete proto.offsetWidth;
+    delete proto.offsetHeight;
+  };
+}
 
 describe('mounting', () => {
   it('renders the shell: gutter, header and plot', () => {
@@ -193,6 +213,98 @@ describe('row gutter interaction', () => {
 });
 
 /**
+ * The gutter's per-row enable/disable button.
+ *
+ * Visibility is CSS, which jsdom does not compute, so these cover the behaviour
+ * behind it: that it reflects and flips the row's state, that the row is marked
+ * for styling, and that the plot then ignores input aimed at the row's bars.
+ */
+describe('row enable toggle', () => {
+  const powers = (container: HTMLElement): HTMLButtonElement[] =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>('.gantt-gutter__power'));
+
+  it('gives every row a button that toggles the row', () => {
+    const { tasks, groups } = fixtureData({ groups: 3 });
+    const onRowDisabledChange = vi.fn();
+    const { container, engine } = mount({ tasks, groups, onRowDisabledChange });
+
+    expect(powers(container)).toHaveLength(3);
+    expect(powers(container)[1].getAttribute('aria-label')).toBe('Disable Group 1');
+    expect(powers(container)[1].getAttribute('aria-pressed')).toBe('true');
+
+    dispatch(powers(container)[1], 'click');
+
+    expect(engine.isRowDisabled('g1')).toBe(true);
+    expect(powers(container)[1].getAttribute('aria-label')).toBe('Enable Group 1');
+    expect(powers(container)[1].getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelectorAll('.gantt-gutter__row.is-disabled')).toHaveLength(1);
+    expect(onRowDisabledChange.mock.calls[0][0].group.id).toBe('g1');
+    expect(onRowDisabledChange.mock.calls[0][1]).toBe(true);
+
+    dispatch(powers(container)[1], 'click');
+    expect(engine.isRowDisabled('g1')).toBe(false);
+    expect(container.querySelectorAll('.gantt-gutter__row.is-disabled')).toHaveLength(0);
+  });
+
+  it('can be left out entirely', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const { container } = mount({ tasks, groups, showRowEnableToggle: false });
+    expect(powers(container)).toHaveLength(0);
+  });
+
+  it('starts from group.disabled', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const { container, engine } = mount({
+      tasks,
+      groups: groups.map((group) => (group.id === 'g1' ? { ...group, disabled: true } : group)),
+    });
+
+    expect(engine.isRowDisabled('g1')).toBe(true);
+    expect(powers(container)[1].className).toContain('is-off');
+  });
+
+  it('fades the row it switched off', async () => {
+    const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 1 });
+    const harness = mount({ tasks, groups });
+    await harness.flush();
+    expect(plotOf(harness.container).innerHTML).not.toContain('opacity="0.4"');
+
+    dispatch(powers(harness.container)[1], 'click');
+    await harness.flush();
+
+    // One bar faded, the other left alone.
+    const faded = plotOf(harness.container).innerHTML.match(/opacity="0\.4"/g) ?? [];
+    expect(faded.length).toBeGreaterThan(0);
+  });
+
+  it('makes the plot ignore clicks and hover on the row', () => {
+    const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 2 });
+    const onTaskClick = vi.fn();
+    const { container, engine } = mount({ tasks, groups, onTaskClick });
+
+    const rect = engine.getTaskRect('g1-t0')!;
+    const point = { clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 };
+    dispatch(powers(container)[1], 'click');
+
+    dispatch(plotOf(container), 'pointermove', point);
+    expect(container.querySelector('.gantt-tooltip')).toBeNull();
+
+    dispatch(plotOf(container), 'pointerdown', point);
+    dispatch(plotOf(container), 'pointerup', point);
+
+    expect(engine.selection.selected.size).toBe(0);
+    expect(onTaskClick).not.toHaveBeenCalled();
+
+    // The row next to it is untouched.
+    const enabled = engine.getTaskRect('g0-t0')!;
+    const at = { clientX: enabled.x + enabled.width / 2, clientY: enabled.y + enabled.height / 2 };
+    dispatch(plotOf(container), 'pointerdown', at);
+    dispatch(plotOf(container), 'pointerup', at);
+    expect(Array.from(engine.selection.selected)).toEqual(['g0-t0']);
+  });
+});
+
+/**
  * The gutter's per-row "more options" (⋯) button.
  *
  * Visibility is CSS (`opacity` under `:hover`), which jsdom does not compute, so
@@ -249,7 +361,12 @@ describe('row options button', () => {
     const { container, engine } = mount({ tasks, groups });
 
     dispatch(buttons(container)[0], 'click');
-    expect(menuLabels(container)).toEqual(['Collapse group', 'Select 4 tasks', 'Zoom to row']);
+    expect(menuLabels(container)).toEqual([
+      'Collapse group',
+      'Disable row',
+      'Select 4 tasks',
+      'Zoom to row',
+    ]);
 
     // The row's own tasks, not every task in the chart.
     const select = Array.from(
@@ -482,6 +599,93 @@ describe('plot interaction', () => {
     expect(container.querySelector('.gantt-tooltip')?.textContent).toBe('custom: g0-t0');
   });
 
+  it('keeps the box inside the plot', () => {
+    const { tasks, groups } = fixtureData({ groups: 3, tasksPerGroup: 4 });
+    const restore = stubBox(200, 200);
+    try {
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+      // Last row, last column: no room on the right of the bar, and none below.
+      const rect = engine.getTaskRect('g2-t3')!;
+      dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
+
+      const tooltip = container.querySelector<HTMLElement>('.gantt-tooltip')!;
+      const left = Number.parseFloat(tooltip.style.left);
+      const top = Number.parseFloat(tooltip.style.top);
+
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(top).toBeGreaterThanOrEqual(0);
+      expect(left + 200).toBeLessThanOrEqual(PLOT_WIDTH);
+      expect(top + 200).toBeLessThanOrEqual(PLOT_HEIGHT);
+      // Flipped to the left of the bar rather than jammed against the edge.
+      expect(left).toBeLessThan(rect.x);
+    } finally {
+      restore();
+    }
+  });
+
+  it('holds the tooltip open while the pointer is inside it', async () => {
+    const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
+    const tooltip = container.querySelector<HTMLElement>('.gantt-tooltip')!;
+
+    // Crossing the gap: the plot loses the pointer, the box catches it.
+    dispatch(plotOf(container), 'pointerleave');
+    dispatch(tooltip, 'pointerenter');
+    await wait(240);
+
+    expect(container.querySelector('.gantt-tooltip')).not.toBeNull();
+    // The bar it belongs to is still hovered, so it stays emphasized.
+    expect(engine.store.getState().hoveredTaskId).toBe('g0-t0');
+
+    dispatch(tooltip, 'pointerleave');
+    expect(engine.store.getState().hoveredTaskId).toBeNull();
+    // Gone after the grace period, not before it.
+    expect(container.querySelector('.gantt-tooltip')).not.toBeNull();
+    await wait(240);
+    expect(container.querySelector('.gantt-tooltip')).toBeNull();
+  });
+
+  it('closes with the hover when it is not interactive', async () => {
+    const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+    const { container, engine } = mount({
+      tasks,
+      groups,
+      locale: 'en-US',
+      tooltipInteractive: false,
+    });
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
+    expect(container.querySelector('.gantt-tooltip.is-static')).not.toBeNull();
+
+    dispatch(plotOf(container), 'pointerleave');
+    expect(container.querySelector('.gantt-tooltip')).toBeNull();
+  });
+
+  it('passes the wheel through to the plot underneath', () => {
+    const { tasks, groups } = fixtureData({ groups: 40, tasksPerGroup: 1 });
+    const { container, engine } = mount({ tasks, groups });
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
+    const tooltip = container.querySelector<HTMLElement>('.gantt-tooltip')!;
+
+    // jsdom does no hit testing, so name what is behind the box directly.
+    const owner = container.ownerDocument as Document & {
+      elementsFromPoint?: (x: number, y: number) => Element[];
+    };
+    owner.elementsFromPoint = () => [tooltip, plotOf(container)];
+    try {
+      dispatch(tooltip, 'wheel', { deltaY: 200 });
+      expect(engine.viewport.state.scrollTop).toBe(200);
+    } finally {
+      delete owner.elementsFromPoint;
+    }
+  });
+
   it('routes keyboard shortcuts to the engine', () => {
     const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 2 });
     const { container, engine } = mount({ tasks, groups });
@@ -531,6 +735,56 @@ describe('editing', () => {
     expect(next.find((task) => task.id === 'g0-t0')?.start).toBe(expected);
     // Controlled: the engine's own copy is untouched until props come back.
     expect(engine.getTask('g0-t0')?.start).toBe(T0);
+  });
+
+  it('reports the drop: tasks, time and the row landed on', () => {
+    const { tasks, groups } = fixtureData({ groups: 3, tasksPerGroup: 2 });
+    const onDragEnd = vi.fn<[GanttDragEndEvent<{ label: string }>], void>();
+    const { engine } = mount({ tasks, groups, onDragEnd });
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    const target = engine.getLayout().rows[2];
+    // Down two rows and a day to the right.
+    const drop = { x: rect.x + 4 + engine.viewport.scale * DAY, y: target.y + target.height / 2 };
+    run(() => engine.drag.begin('g0-t0', { x: rect.x + 4, y: rect.y + 4 }));
+    run(() => engine.drag.move(drop));
+    run(() => engine.drag.commit());
+
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+    const event = onDragEnd.mock.calls[0][0];
+
+    expect(event.tasks.map((task) => task.id)).toEqual(['g0-t0']);
+    // The task still reads as it was: the changes carry where it is going.
+    expect(event.tasks[0].start).toBe(T0);
+    expect(event.changes[0].start).toBe(T0 + DAY);
+    expect(event.changes[0].groupId).toBe('g2');
+    expect(event.changes[0].previous.groupId).toBe('g0');
+
+    expect(event.mode).toBe('free');
+    expect(event.deltaRow).toBe(2);
+    expect(event.deltaTime).toBe(DAY);
+    expect(event.point).toEqual(drop);
+    expect(event.time).toBeCloseTo(engine.viewport.pxToTime(drop.x), 6);
+    expect(event.row?.index).toBe(2);
+    expect(event.group?.id).toBe('g2');
+    expect(event.cancelled).toBe(false);
+  });
+
+  it('reports a cancelled drag as one, on the row it started from', () => {
+    const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 1 });
+    const onDragEnd = vi.fn<[GanttDragEndEvent<{ label: string }>], void>();
+    const { engine } = mount({ tasks, groups, onDragEnd });
+
+    const rect = engine.getTaskRect('g1-t0')!;
+    run(() => engine.drag.begin('g1-t0', { x: rect.x + 4, y: rect.y + 4 }));
+    run(() => engine.drag.move({ x: rect.x + 84, y: rect.y + 4 }));
+    run(() => engine.drag.cancel());
+
+    const event = onDragEnd.mock.calls[0][0];
+    expect(event.cancelled).toBe(true);
+    expect(event.changes).toEqual([]);
+    expect(event.tasks).toEqual([]);
+    expect(event.group?.id).toBe('g1');
   });
 
   it('ignores a cancelled drag', () => {

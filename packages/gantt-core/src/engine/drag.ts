@@ -1,7 +1,7 @@
 import { clamp } from '../util/search';
 import type { DragMode, DragState, GanttId, Point, TaskChange } from '../types';
 import type { EngineContext } from './context';
-import { nearestRowIndex } from './layout';
+import { isRowDisabled, isTaskRowDisabled, nearestRowIndex } from './layout';
 import type { SelectionEngine } from './selection';
 import type { ViewportController } from './viewport';
 
@@ -66,9 +66,9 @@ export class DragEngine<T = unknown, G = unknown> {
   }
 
   /**
-   * Arm a gesture. Returns false when dragging is disabled or the task is
-   * unknown. The gesture stays inactive (and renders nothing) until the
-   * pointer passes {@link DRAG_THRESHOLD_PX}.
+   * Arm a gesture. Returns false when dragging is disabled, the task is
+   * unknown, or it sits on a disabled row. The gesture stays inactive (and
+   * renders nothing) until the pointer passes {@link DRAG_THRESHOLD_PX}.
    */
   begin(taskId: GanttId, point: Point, options: DragBeginOptions = {}): boolean {
     const interaction = this.ctx.getOptions().interaction;
@@ -81,6 +81,7 @@ export class DragEngine<T = unknown, G = unknown> {
     const taskIndex = model.taskIndexById.get(taskId);
     if (taskIndex === undefined) return false;
     if (model.tasks[taskIndex].draggable === false) return false;
+    if (isTaskRowDisabled(layout, taskIndex)) return false;
 
     if (options.selectOnBegin !== false && !this.selection.isSelected(taskId)) {
       this.selection.handleClick(taskId);
@@ -98,7 +99,12 @@ export class DragEngine<T = unknown, G = unknown> {
 
     taskIds = taskIds.filter((id) => {
       const index = model.taskIndexById.get(id);
-      return index !== undefined && model.tasks[index].draggable !== false && layout.taskRow[index] >= 0;
+      return (
+        index !== undefined &&
+        model.tasks[index].draggable !== false &&
+        layout.taskRow[index] >= 0 &&
+        !isTaskRowDisabled(layout, index)
+      );
     });
     if (taskIds.length === 0) return false;
 
@@ -146,7 +152,7 @@ export class DragEngine<T = unknown, G = unknown> {
     }
 
     const deltaTime = this.snap(dx / Math.max(this.viewport.scale, Number.MIN_VALUE));
-    const deltaRow = drag.mode === 'free' ? this.resolveRowDelta(point.y) : 0;
+    const deltaRow = drag.mode === 'free' ? this.resolveRowDelta(point.y, drag.deltaRow) : 0;
 
     if (drag.active && drag.deltaTime === deltaTime && drag.deltaRow === deltaRow) {
       // Sub-pixel pointer noise — nothing visible would change.
@@ -218,7 +224,10 @@ export class DragEngine<T = unknown, G = unknown> {
           if (drag.mode === 'free' && drag.deltaRow !== 0) {
             const originRow = this.originRows.get(id) ?? layout.taskRow[index];
             const targetRow = clamp(originRow + drag.deltaRow, 0, layout.rows.length - 1);
-            groupId = layout.rows[targetRow].group.id;
+            // Belt and braces: the gesture already refuses to target a disabled
+            // row, and a row disabled mid-drag cancels it. A change that would
+            // still land on one keeps its group instead.
+            if (!isRowDisabled(layout, targetRow)) groupId = layout.rows[targetRow].group.id;
           }
         }
       }
@@ -236,12 +245,17 @@ export class DragEngine<T = unknown, G = unknown> {
   /**
    * Vertical delta in *rows*, derived from the row under the pointer rather
    * than from a pixel division — row heights vary with lane count.
+   *
+   * A disabled row is not a drop target: the gesture holds `current` instead,
+   * so dragging across one glides over it rather than snapping back to the
+   * origin.
    */
-  private resolveRowDelta(pointerY: number): number {
+  private resolveRowDelta(pointerY: number, current: number): number {
     const layout = this.ctx.getLayout();
     if (layout.rows.length === 0 || this.originRowIndex < 0) return 0;
     const targetRow = nearestRowIndex(layout, this.viewport.pxToContent(pointerY));
     if (targetRow < 0) return 0;
+    if (isRowDisabled(layout, targetRow)) return current;
 
     const delta = targetRow - this.originRowIndex;
     if (delta === 0) return 0;

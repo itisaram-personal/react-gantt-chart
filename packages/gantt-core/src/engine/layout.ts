@@ -1,8 +1,47 @@
 import type { DataModel } from '../data/dataModel';
 import { LaneAllocator, MILESTONE_EPSILON } from '../util/laneAllocator';
-import { upperBoundIndex } from '../util/search';
-import type { GanttEngineOptions, GanttRow, LayoutResult } from '../types';
+import { clamp, upperBoundIndex } from '../util/search';
+import type { GanttEngineOptions, GanttLength, GanttRow, LayoutResult } from '../types';
 import type { RowModel } from './rows';
+
+/**
+ * Ceiling on a percentage padding, per side.
+ *
+ * At 50% the two sides meet and the content is gone; solving a row height from
+ * a ratio that high divides by zero. 45% leaves a tenth of the box for content
+ * — visually useless, but finite.
+ */
+const MAX_PAD_RATIO = 0.45;
+
+/** The ratio a percentage length asks for, or 0 for a pixel length. */
+function padRatio(value: GanttLength): number {
+  if (typeof value === 'number') return 0;
+  const percent = parseFloat(value);
+  return Number.isFinite(percent) ? clamp(percent / 100, 0, MAX_PAD_RATIO) : 0;
+}
+
+/**
+ * Resolve a {@link GanttLength} against the box it is measured in.
+ *
+ * `basis` is ignored for a pixel length, so a caller can pass the container
+ * height unconditionally.
+ */
+export function resolveLength(value: GanttLength, basis: number): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.max(0, value) : 0;
+  return padRatio(value) * basis;
+}
+
+/**
+ * Outer height a box needs to hold `content` with `pad` on both sides.
+ *
+ * The percentage case is the interesting one: the padding is a share of the
+ * height being solved for, so `h = content + 2·r·h` — one rearrangement rather
+ * than an iteration.
+ */
+function outerHeight(content: number, pad: GanttLength): number {
+  if (typeof pad === 'number') return content + resolveLength(pad, 0) * 2;
+  return content / (1 - 2 * padRatio(pad));
+}
 
 /**
  * Stacking + layout pass.
@@ -155,7 +194,7 @@ export function computeLayout<T, G>(
   // In uniform mode every row is as tall as a single-lane row would be, and
   // deeper stacks are absorbed by thinner lanes rather than a taller row.
   const uniformHeight = metrics.uniformRowHeight
-    ? Math.max(metrics.minRowHeight, metrics.laneHeight + metrics.rowPaddingY * 2)
+    ? Math.max(metrics.minRowHeight, outerHeight(metrics.laneHeight, metrics.rowPaddingY))
     : 0;
 
   for (let r = 0; r < rowCount; r++) {
@@ -164,13 +203,19 @@ export function computeLayout<T, G>(
 
     let height: number;
     let laneHeight: number;
+    // Resolved from the height the row actually ends up with — which is what
+    // makes a percentage padding hold its proportion under a `group.height`
+    // override or a `minRowHeight` floor, not just at the natural height.
+    let padding: number;
     if (uniformHeight > 0) {
       height = row.group.height ?? uniformHeight;
-      laneHeight = Math.max(1, height - metrics.rowPaddingY * 2) / laneCount;
+      padding = resolveLength(metrics.rowPaddingY, height);
+      laneHeight = Math.max(1, height - padding * 2) / laneCount;
     } else {
       laneHeight = metrics.laneHeight;
-      const natural = laneCount * laneHeight + metrics.rowPaddingY * 2;
+      const natural = outerHeight(laneCount * laneHeight, metrics.rowPaddingY);
       height = row.group.height ?? Math.max(metrics.minRowHeight, natural);
+      padding = resolveLength(metrics.rowPaddingY, height);
     }
     const content = laneCount * laneHeight;
 
@@ -179,13 +224,13 @@ export function computeLayout<T, G>(
     row.y = y;
     row.height = height;
     // Lanes are centred when the row is taller than the stack needs.
-    row.laneOffset = Math.max(metrics.rowPaddingY, (height - content) / 2);
+    row.laneOffset = Math.max(padding, (height - content) / 2);
 
     // Cluster lane counts → pixels. Uniform rows divide the same band between
     // however many lanes *that cluster* needs, so an isolated bar fills the row
     // while a three-deep pile-up gets a third each. Growing rows keep one
     // height for every bar — the row already grew to make room.
-    const available = uniformHeight > 0 ? Math.max(1, height - metrics.rowPaddingY * 2) : 0;
+    const available = uniformHeight > 0 ? Math.max(1, height - padding * 2) : 0;
     for (let rank = rowOffsets[r]; rank < rowOffsets[r + 1]; rank++) {
       const i = rankToTask[rank];
       taskLaneHeight[i] = uniformHeight > 0 ? available / taskLaneHeight[i] : laneHeight;
@@ -236,11 +281,12 @@ export function laneTop(row: GanttRow, lane: number, laneHeight: number = row.la
 /**
  * Inset of a bar inside its lane, px.
  *
- * Capped at a quarter of the lane so a compressed stack still renders bars
- * rather than collapsing into padding.
+ * A percentage `itemPaddingY` is resolved against the lane, so the inset tracks
+ * the space the bar actually got. Capped at a quarter of the lane either way,
+ * so a compressed stack still renders bars rather than collapsing into padding.
  */
-export function barInset(laneHeight: number, itemPaddingY: number): number {
-  return Math.min(itemPaddingY, laneHeight / 4);
+export function barInset(laneHeight: number, itemPaddingY: GanttLength): number {
+  return Math.min(resolveLength(itemPaddingY, laneHeight), laneHeight / 4);
 }
 
 /**
@@ -252,6 +298,21 @@ export function rowIndexAt<G>(layout: LayoutResult<G>, contentY: number): number
   if (count === 0 || contentY < 0 || contentY >= layout.totalHeight) return -1;
   const index = upperBoundIndex(layout.rowY, contentY, 0, count);
   return index < 0 ? -1 : index;
+}
+
+/** Is `rowIndex` a disabled row? Out-of-range indices count as enabled. */
+export function isRowDisabled<G>(layout: LayoutResult<G>, rowIndex: number): boolean {
+  return rowIndex >= 0 && rowIndex < layout.rows.length && layout.rows[rowIndex].disabled;
+}
+
+/**
+ * Does the task at `taskIndex` sit on a disabled row?
+ *
+ * The single question every interaction engine asks before acting on a task,
+ * so it stays one lookup rather than a per-engine reimplementation.
+ */
+export function isTaskRowDisabled<G>(layout: LayoutResult<G>, taskIndex: number): boolean {
+  return isRowDisabled(layout, layout.taskRow[taskIndex]);
 }
 
 /** Nearest row to a content-space y coordinate, clamped to the content bounds. */

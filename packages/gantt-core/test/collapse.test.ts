@@ -134,6 +134,16 @@ describe('group tree and collapsing', () => {
     expect(engine.getLayout().rows.length).toBe(2);
   });
 
+  it('finds a group its row, following collapse', () => {
+    const engine = makeEngine();
+    expect(engine.getRow('grandchild')?.index).toBe(2);
+    expect(engine.getRow('nobody')).toBeNull();
+
+    engine.setCollapsed('root', true);
+    // Hidden, but its tasks are drawn on the ancestor they roll up onto.
+    expect(engine.getRow('grandchild')?.group.id).toBe('root');
+  });
+
   it('creates rows for groups referenced only by tasks', () => {
     const engine = new GanttEngine({
       tasks: [{ id: 't', groupId: 'ghost', start: 0, end: 1 }],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GanttEngine } from '../src/GanttEngine';
-import { barInset } from '../src/engine/layout';
+import { barInset, resolveLength } from '../src/engine/layout';
 import { LaneAllocator } from '../src/util/laneAllocator';
 import type { GanttTask } from '../src/types';
 import { generate, mulberry32 } from './helpers';
@@ -81,13 +81,17 @@ describe('stacking through the engine', () => {
       { id: 'b', groupId: 'g', start: 10, end: 100 },
       { id: 'c', groupId: 'g', start: 20, end: 100 },
     ];
-    const engine = new GanttEngine({ tasks, options: { minTimeSpan: 1 } });
+    // Growing rows are what this is about, so the uniform default is off.
+    const engine = new GanttEngine({
+      tasks,
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: false } },
+    });
     expect([laneOf(engine, 'a'), laneOf(engine, 'b'), laneOf(engine, 'c')]).toEqual([0, 1, 2]);
 
     const row = engine.getLayout().rows[0];
     expect(row.laneCount).toBe(3);
     const { laneHeight, rowPaddingY } = engine.getOptions().metrics;
-    expect(row.height).toBe(3 * laneHeight + 2 * rowPaddingY);
+    expect(row.height).toBeCloseTo(3 * laneHeight + 2 * resolveLength(rowPaddingY, row.height));
   });
 
   it('honours minGap when deciding whether two tasks may share a lane', () => {
@@ -221,18 +225,26 @@ describe('uniform row heights', () => {
   it('gives every row the same height and divides the lanes out of it', () => {
     const engine = uniform();
     const { laneHeight, rowPaddingY, minRowHeight } = engine.getOptions().metrics;
-    const expected = Math.max(minRowHeight, laneHeight + rowPaddingY * 2);
     const layout = engine.getLayout();
+    const [flat, stacked] = layout.rows;
+    // The height a single-lane row takes, floored by minRowHeight. With a
+    // percentage padding that is the height whose own padding leaves exactly
+    // one lane, so it is read back off the row rather than added up here.
+    const expected = flat.height;
+    expect(expected).toBeGreaterThanOrEqual(minRowHeight);
+    expect(expected - 2 * resolveLength(rowPaddingY, expected)).toBeCloseTo(laneHeight);
 
     expect(layout.rows.map((row) => row.height)).toEqual([expected, expected]);
     expect(layout.totalHeight).toBe(expected * 2);
 
-    const [flat, stacked] = layout.rows;
     expect(flat.laneCount).toBe(1);
     expect(stacked.laneCount).toBe(3);
     // Same usable space, three ways: a third of the lane height each.
     expect(stacked.laneHeight).toBeCloseTo(flat.laneHeight / 3);
-    expect(stacked.laneOffset).toBe(rowPaddingY);
+    // Every uniform row gets the same inset, whatever its stack depth — the
+    // point of measuring the padding against the row.
+    expect(stacked.laneOffset).toBeCloseTo(resolveLength(rowPaddingY, stacked.height));
+    expect(stacked.laneOffset).toBeCloseTo(flat.laneOffset);
   });
 
   it('shrinks stacked bars to fit and keeps them inside the row', () => {
@@ -303,7 +315,8 @@ describe('uniform row heights', () => {
     const items = engine.getVisible().items;
     const bar = (id: string): (typeof items)[number] => items.find((item) => item.task.id === id)!;
     expect(bar('alone').height).toBeGreaterThan(bar('c').height);
-    expect(bar('alone').y).toBe(row.y + row.laneOffset + barInset(available, 3));
+    const { itemPaddingY } = engine.getOptions().metrics;
+    expect(bar('alone').y).toBe(row.y + row.laneOffset + barInset(available, itemPaddingY));
     expect(bar('alone').y + bar('alone').height).toBeLessThanOrEqual(row.y + row.height);
   });
 
@@ -362,15 +375,21 @@ describe('uniform row heights', () => {
     const row = engine.getLayout().rows[1];
 
     expect(row.height).toBe(90);
-    expect(row.laneHeight).toBeCloseTo((90 - rowPaddingY * 2) / 3);
+    // The padding is resolved against the override, so it scales with it.
+    expect(row.laneHeight).toBeCloseTo((90 - resolveLength(rowPaddingY, 90) * 2) / 3);
   });
 
   it('leaves rows growing with the stack when the option is off', () => {
-    const engine = new GanttEngine({ tasks: TASKS, options: { minTimeSpan: 1 } });
+    const engine = new GanttEngine({
+      tasks: TASKS,
+      options: { minTimeSpan: 1, metrics: { uniformRowHeight: false } },
+    });
     const { laneHeight, rowPaddingY } = engine.getOptions().metrics;
     const [flat, stacked] = engine.getLayout().rows;
 
-    expect(stacked.height).toBe(3 * laneHeight + rowPaddingY * 2);
+    expect(stacked.height).toBeCloseTo(
+      3 * laneHeight + resolveLength(rowPaddingY, stacked.height) * 2,
+    );
     expect(stacked.height).toBeGreaterThan(flat.height);
     expect(stacked.laneHeight).toBe(laneHeight);
   });

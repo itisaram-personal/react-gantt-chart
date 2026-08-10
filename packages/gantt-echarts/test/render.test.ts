@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as echarts from 'echarts';
+import { barInset } from '@gantt-chart/core';
 import { darkTheme, lightTheme } from '@gantt-chart/themes';
 import { GanttEChartsAdapter, type EChartsLike } from '../src/adapter';
 import { DAY, T0, fixture } from './helpers';
@@ -49,6 +50,25 @@ function dataIndices(svg: string, seriesIndex = 1): number[] {
     if (Number(match[1]) === seriesIndex) out.push(Number(match[2]));
   }
   return out;
+}
+
+/**
+ * Was a bar painted at this rect?
+ *
+ * A square rect serialises as move-then-relative-lines, so the geometry the
+ * engine computed is readable straight out of the path data — but zrender
+ * rounds those coordinates to one decimal on the way out, so the numbers are
+ * pulled back out and compared rather than substring-matched.
+ */
+function hasBarAt(svg: string, rect: { x: number; y: number; width: number }): boolean {
+  const pattern = /M(-?[\d.]+) (-?[\d.]+)l(-?[\d.]+) 0/g;
+  const near = (value: number, target: number): boolean => Math.abs(value - target) <= 0.06;
+  for (let match = pattern.exec(svg); match !== null; match = pattern.exec(svg)) {
+    if (near(Number(match[1]), rect.x) && near(Number(match[2]), rect.y) && near(Number(match[3]), rect.width)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** A square-cornered bar, so the SVG path is a plain move-and-line. */
@@ -103,14 +123,18 @@ describe('rendering through a real ECharts instance', () => {
     adapter.attach(chart);
     track(adapter, chart);
 
+    const row = engine.getLayout().rows[0];
     const rect = engine.getTaskRect('g0-t0')!;
     expect(rect.x).toBeCloseTo(0, 6);
     expect(rect.width).toBeCloseTo(80, 6); // One day at 10 days per 800px.
-    expect(rect.y).toBeCloseTo(7, 6); // Row top + lane offset + item padding.
+    // Row top + lane offset + item padding. Read off the layout rather than
+    // hardcoded: both paddings are proportions of their box by default.
+    expect(rect.y).toBeCloseTo(
+      row.y + row.laneOffset + barInset(row.laneHeight, engine.getOptions().metrics.itemPaddingY),
+      6,
+    );
 
-    // A square rect serialises as move-then-relative-lines, so the geometry the
-    // engine computed is readable straight out of the path data.
-    expect(chart.renderToSVGString()).toContain(`M${rect.x} ${rect.y}l${rect.width} 0`);
+    expect(hasBarAt(chart.renderToSVGString(), rect)).toBe(true);
   });
 
   it('moves the bars when the viewport pans', () => {
@@ -124,8 +148,10 @@ describe('rendering through a real ECharts instance', () => {
     adapter.attach(chart);
     track(adapter, chart);
 
+    const start = engine.getTaskRect('g0-t2')!; // Starts on day 4.
     const before = chart.renderToSVGString();
-    expect(before).toContain('M320 7l80 0'); // `g0-t2` starts on day 4.
+    expect(start.x).toBeCloseTo(320, 6);
+    expect(hasBarAt(before, start)).toBe(true);
 
     engine.viewport.panByTime(2 * DAY);
     adapter.render();
@@ -135,7 +161,7 @@ describe('rendering through a real ECharts instance', () => {
     // Panning two days forward moves that bar 160px left.
     const moved = engine.getTaskRect('g0-t2')!;
     expect(moved.x).toBeCloseTo(160, 6);
-    expect(after).toContain(`M${moved.x} ${moved.y}l${moved.width} 0`);
+    expect(hasBarAt(after, moved)).toBe(true);
   });
 
   it('repaints with the new theme', () => {

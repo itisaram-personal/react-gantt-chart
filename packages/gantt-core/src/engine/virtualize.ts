@@ -188,6 +188,9 @@ export function computeVisible<T, G>(input: VirtualizeInput<T, G>): VisibleWindo
 /**
  * Task indices whose bars intersect a rectangle in content pixels / time.
  *
+ * Disabled rows are skipped, so a marquee dragged across one passes over it
+ * instead of picking its bars up.
+ *
  * `options` is unused — lane geometry now comes off the row — but kept so the
  * signature stays source-compatible.
  */
@@ -214,6 +217,7 @@ export function queryRect<T, G>(
 
   for (let r = rowStart; r <= rowEnd; r++) {
     const row = rows[r];
+    if (row.disabled) continue;
     if (row.y > yEnd || row.y + row.height < yStart) continue;
     const from = layout.rowOffsets[r];
     const to = layout.rowOffsets[r + 1];

@@ -3,8 +3,15 @@ import { affectsLayout, resolveOptions, defaultOptions, DAY } from './defaults';
 import { ContextMenuEngine } from './engine/contextMenu';
 import type { EngineContext } from './engine/context';
 import { DragEngine } from './engine/drag';
-import { barInset, computeLayout, laneTop, nearestRowIndex, rowIndexAt } from './engine/layout';
-import { resolveRows, type RowModel } from './engine/rows';
+import {
+  barInset,
+  computeLayout,
+  isTaskRowDisabled,
+  laneTop,
+  nearestRowIndex,
+  rowIndexAt,
+} from './engine/layout';
+import { applyDisabled, resolveRows, type RowModel } from './engine/rows';
 import { SelectionEngine } from './engine/selection';
 import { ViewportController } from './engine/viewport';
 import { computeVisible } from './engine/virtualize';
@@ -83,6 +90,8 @@ export class GanttEngine<T = unknown, G = unknown> {
 
   // --- memoized pipeline stages ---
   private rowCache: { key: string; value: RowModel<G> } | null = null;
+  /** Which (row model, disabled set) pair the rows are currently stamped with. */
+  private disabledStamp: { rows: RowModel<G>; disabled: ReadonlySet<GanttId> } | null = null;
   private layoutCache: { rows: RowModel<G>; options: GanttEngineOptions; value: LayoutResult<G> } | null = null;
   private visibleCache: {
     layout: LayoutResult<G>;
@@ -203,11 +212,25 @@ export class GanttEngine<T = unknown, G = unknown> {
    * ---------------------------------------------------------------- */
 
   getRows(): RowModel<G> {
-    const collapsed = this.store.getState().collapsed;
+    const { collapsed, disabled } = this.store.getState();
     const key = `${this.model.revision}:${this.options.stacking.rollupCollapsed}:${collapsed.size}:${hashIds(collapsed)}`;
-    if (this.rowCache && this.rowCache.key === key) return this.rowCache.value;
-    const value = resolveRows(this.model, collapsed, this.options.stacking.rollupCollapsed);
-    this.rowCache = { key, value };
+
+    let value = this.rowCache && this.rowCache.key === key ? this.rowCache.value : null;
+    if (!value) {
+      value = resolveRows(this.model, collapsed, this.options.stacking.rollupCollapsed, disabled);
+      this.rowCache = { key, value };
+      this.disabledStamp = { rows: value, disabled };
+      return value;
+    }
+
+    // Disabled state is deliberately not part of the cache key: it changes no
+    // geometry, so a toggle re-stamps the cached rows instead of rebuilding
+    // them (and the layout that hangs off them).
+    const stamp = this.disabledStamp;
+    if (!stamp || stamp.rows !== value || stamp.disabled !== disabled) {
+      applyDisabled(value.rows, disabled);
+      this.disabledStamp = { rows: value, disabled };
+    }
     return value;
   }
 
@@ -317,6 +340,33 @@ export class GanttEngine<T = unknown, G = unknown> {
     this.commitCollapsed(new Set<GanttId>(), null, false);
   }
 
+  /**
+   * Is the row for `groupId` inert? See {@link GanttRow.disabled} for exactly
+   * what a disabled row ignores.
+   */
+  isRowDisabled(groupId: GanttId): boolean {
+    return this.store.getState().disabled.has(groupId);
+  }
+
+  setRowDisabled(groupId: GanttId, disabled: boolean): void {
+    const current = this.store.getState().disabled;
+    if (current.has(groupId) === disabled) return;
+    const next = new Set(current);
+    if (disabled) next.add(groupId);
+    else next.delete(groupId);
+    this.commitDisabled(next, groupId, disabled);
+  }
+
+  toggleRowDisabled(groupId: GanttId): void {
+    this.setRowDisabled(groupId, !this.isRowDisabled(groupId));
+  }
+
+  /** Re-enable every row. */
+  enableAllRows(): void {
+    if (this.store.getState().disabled.size === 0) return;
+    this.commitDisabled(new Set<GanttId>(), null, false);
+  }
+
   /* ---------------------------------------------------------------- *
    * Hit testing
    * ---------------------------------------------------------------- */
@@ -327,6 +377,10 @@ export class GanttEngine<T = unknown, G = unknown> {
    * Renderers that already know the hit target (ECharts hands us a data index)
    * should use that; this exists for background clicks, axis interactions and
    * headless testing.
+   *
+   * Deliberately truthful about disabled rows: it answers what is *there*, and
+   * the caller decides what input is allowed. `result.row.disabled` says
+   * whether acting on the hit would be ignored.
    */
   hitTest(point: Point): HitTestResult<T, G> {
     const layout = this.getLayout();
@@ -379,6 +433,18 @@ export class GanttEngine<T = unknown, G = unknown> {
       }
     }
     return result;
+  }
+
+  /**
+   * The row a group's tasks are drawn on, or null when they are drawn nowhere —
+   * an unknown group, or one hidden behind a collapsed ancestor with rollup off.
+   * A group swallowed by a collapsed ancestor reports that ancestor's row.
+   */
+  getRow(groupId: GanttId): GanttRow<G> | null {
+    const groupIndex = this.model.groupIndexById.get(groupId);
+    if (groupIndex === undefined) return null;
+    const rowIndex = this.getRows().groupToRow[groupIndex];
+    return rowIndex >= 0 ? this.getLayout().rows[rowIndex] : null;
   }
 
   /** Row under a plot-space y coordinate, clamped into range. */
@@ -493,28 +559,85 @@ export class GanttEngine<T = unknown, G = unknown> {
   }
 
   /**
+   * Commit a new disabled set.
+   *
+   * Unlike a collapse this leaves every cache alone — the row stamp in
+   * {@link getRows} is the only thing that has to catch up — but it does have
+   * to drop the interaction state a row is no longer allowed to hold: a
+   * selection on it, a hover, and a gesture in flight over it.
+   */
+  private commitDisabled(next: ReadonlySet<GanttId>, groupId: GanttId | null, disabled: boolean): void {
+    this.store.setState({ disabled: next });
+    // Re-stamp before anything reads a row, so `row.disabled` and the store
+    // never disagree.
+    this.getRows();
+
+    const state = this.store.getState();
+    if (state.drag && this.dragTouchesDisabledRow(state.drag.taskIds)) this.drag.cancel();
+    if (state.selection.size > 0) {
+      const layout = this.getLayout();
+      const kept = new Set<GanttId>();
+      for (const id of state.selection) {
+        const index = this.model.taskIndexById.get(id);
+        if (index !== undefined && !isTaskRowDisabled(layout, index)) kept.add(id);
+      }
+      if (kept.size !== state.selection.size) {
+        const anchor = state.selectionAnchor;
+        this.selection.set(kept, anchor !== null && kept.has(anchor) ? anchor : null);
+      }
+    }
+    if (state.hoveredTaskId !== null) {
+      const index = this.model.taskIndexById.get(state.hoveredTaskId);
+      if (index !== undefined && isTaskRowDisabled(this.getLayout(), index)) {
+        this.setHovered(null, state.hoveredRowIndex);
+      }
+    }
+
+    if (groupId !== null) {
+      const rowIndex = this.getRows().groupToRow[this.model.groupIndexById.get(groupId) ?? -1];
+      const row = rowIndex >= 0 ? this.getLayout().rows[rowIndex] : null;
+      if (row) this.events.emit('row:disable', { row, disabled });
+    }
+  }
+
+  private dragTouchesDisabledRow(taskIds: readonly GanttId[]): boolean {
+    const layout = this.getLayout();
+    for (const id of taskIds) {
+      const index = this.model.taskIndexById.get(id);
+      if (index !== undefined && isTaskRowDisabled(layout, index)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Keep store state meaningful across a data replacement: drop selection and
-   * hover entries for tasks that no longer exist, seed collapse state from
-   * newly-introduced groups, and frame the data on first load.
+   * hover entries for tasks that no longer exist, seed collapse and disabled
+   * state from newly-introduced groups, and frame the data on first load.
    */
   private reconcileStateWithData(isFirstLoad: boolean): void {
     this.store.batch(() => {
       const state = this.store.getState();
 
-      let collapsed = state.collapsed;
+      const collapsed = state.collapsed;
+      const disabled = state.disabled;
       const nextCollapsed = new Set<GanttId>();
+      const nextDisabled = new Set<GanttId>();
       for (const group of this.model.groups) {
-        const known = collapsed.has(group.id);
         // Groups seen before keep their runtime state; new ones adopt the
-        // `collapsed` flag from the data.
-        if (known || (group.collapsed && !this.seenGroups.has(group.id))) nextCollapsed.add(group.id);
+        // `collapsed` / `disabled` flags from the data.
+        const isNew = !this.seenGroups.has(group.id);
+        if (collapsed.has(group.id) || (group.collapsed && isNew)) nextCollapsed.add(group.id);
+        if (disabled.has(group.id) || (group.disabled && isNew)) nextDisabled.add(group.id);
         this.seenGroups.add(group.id);
       }
       if (nextCollapsed.size !== collapsed.size || !isSuperset(collapsed, nextCollapsed)) {
-        collapsed = nextCollapsed;
-        this.store.setState({ collapsed });
+        this.store.setState({ collapsed: nextCollapsed });
         this.rowCache = null;
         this.layoutCache = null;
+      }
+      // Only the row stamp has to catch up — `getRows` does that on the way out.
+      if (nextDisabled.size !== disabled.size || !isSuperset(disabled, nextDisabled)) {
+        this.store.setState({ disabled: nextDisabled });
       }
 
       if (state.selection.size > 0) {

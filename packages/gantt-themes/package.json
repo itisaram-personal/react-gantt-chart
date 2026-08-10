@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/themes",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Light and dark themes for the Gantt chart.",
   "license": "MIT",
   "repository": {
@@ -32,7 +32,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gantt-chart/core": "^0.1.1"
+    "@gantt-chart/core": "^0.1.2"
   },
   "devDependencies": {
     "tsup": "^8.0.2",

@@ -9,7 +9,7 @@
  */
 
 export { GanttChart } from './GanttChart';
-export type { GanttChartProps } from './GanttChart';
+export type { GanttChartProps, GanttDragEndEvent } from './GanttChart';
 
 export { GanttPlot } from './GanttPlot';
 export type { GanttPlotProps } from './GanttPlot';

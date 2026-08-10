@@ -12,6 +12,11 @@ export interface GanttState<T = unknown, G = unknown> {
   viewport: ViewportState;
   contextMenu: ContextMenuState<T, G> | null;
   collapsed: ReadonlySet<GanttId>;
+  /**
+   * Ids of the groups whose rows ignore input. Geometry is unaffected, so this
+   * lives outside the layout inputs and never bumps `layoutRevision`.
+   */
+  disabled: ReadonlySet<GanttId>;
   /** Bumped whenever tasks/groups are replaced. */
   dataRevision: number;
   /** Bumped whenever layout inputs change (data, collapse, metrics). */
@@ -31,6 +36,7 @@ export function createInitialState<T, G>(viewport: ViewportState): GanttState<T,
     viewport,
     contextMenu: null,
     collapsed: new Set<GanttId>(),
+    disabled: new Set<GanttId>(),
     dataRevision: 0,
     layoutRevision: 0,
   };

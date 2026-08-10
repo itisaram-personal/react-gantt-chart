@@ -13,10 +13,19 @@ export { defaultOptions, resolveOptions, affectsLayout, MINUTE, HOUR, DAY, WEEK,
 export { normalize, emptyModel } from './data/dataModel';
 export type { DataModel, NormalizeResult } from './data/dataModel';
 
-export { resolveRows } from './engine/rows';
+export { resolveRows, applyDisabled } from './engine/rows';
 export type { RowModel } from './engine/rows';
 
-export { computeLayout, laneTop, barInset, rowIndexAt, nearestRowIndex } from './engine/layout';
+export {
+  computeLayout,
+  laneTop,
+  barInset,
+  resolveLength,
+  rowIndexAt,
+  nearestRowIndex,
+  isRowDisabled,
+  isTaskRowDisabled,
+} from './engine/layout';
 export { computeVisible, queryRect } from './engine/virtualize';
 export type { VirtualizeInput } from './engine/virtualize';
 

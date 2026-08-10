@@ -26,6 +26,8 @@ export interface GanttItemState {
   dragging: boolean;
   /** True for the bar the current gesture started on. */
   primary: boolean;
+  /** The bar's row ignores input — see {@link GanttRow.disabled}. */
+  disabled: boolean;
 }
 
 export interface GanttRenderHelpers {
@@ -159,6 +161,9 @@ export class RenderContextBuilder<T = unknown, G = unknown> {
         hovered: item.hovered,
         dragging: item.dragging,
         primary: this.primaryTaskId !== null && item.task.id === this.primaryTaskId,
+        // Read off the row rather than the item: disabling is not part of the
+        // virtualized frame, so the row is the value that is always current.
+        disabled: row.disabled,
       },
       viewport: this.viewport,
       theme: this.theme,

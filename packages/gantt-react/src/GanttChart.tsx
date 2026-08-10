@@ -4,6 +4,8 @@ import {
   type AxisRowDescriptor,
   type ContextMenuState,
   type DeepPartial,
+  type DragMode,
+  type DragState,
   type GanttEngine,
   type GanttEngineOptions,
   type GanttGroup,
@@ -11,6 +13,7 @@ import {
   type GanttPlugin,
   type GanttRow,
   type GanttTask,
+  type Point,
   type TaskChange,
   type ViewportState,
 } from "@gantt-chart/core";
@@ -32,6 +35,54 @@ import { GanttRowZoomBar, GanttTimeZoomBar } from "./GanttZoomBar";
 import { useGanttEngine } from "./useGanttEngine";
 import { useGanttExport, type GanttExportApi } from "./useGanttExport";
 
+/**
+ * What a finished drag or resize did — the gesture, not the data.
+ *
+ * `changes` is the same list `onChanges` receives, so the tasks and their new
+ * values are here too; the rest is what only the gesture knows: where the
+ * pointer let go, and what it let go over.
+ */
+export interface GanttDragEndEvent<T = unknown, G = unknown> {
+  /**
+   * The tasks the gesture moved, in the same order as {@link changes} and
+   * holding the values they had *before* it: this fires before the changes are
+   * applied, and `changes[i]` carries the new start, end and group for
+   * `tasks[i]` (with the old ones in its `previous`).
+   *
+   * Empty for a gesture that changed nothing, and for a cancelled one.
+   */
+  tasks: GanttTask<T>[];
+  /** Proposed edits, each with the values it started from in `previous`. */
+  changes: TaskChange[];
+  /** Move, or which resize handle was dragged. */
+  mode: DragMode;
+  /** Where the pointer was let go, in plot pixels. */
+  point: Point;
+  /** The time under that point — the drop time, before any snapping. */
+  time: number;
+  /**
+   * The row the tasks landed on, and its group.
+   *
+   * Where they *landed*, which is not always what the pointer was over: a drop
+   * on a disabled row leaves the tasks where they were, and this reports that
+   * row. A gesture that changed nothing — a resize, a cancel, a move that came
+   * back to where it started — reports the row it began on. Null only when the
+   * origin task is gone, or is drawn on no row at all.
+   *
+   * One row, not one per task: a selection spanning several rows moves
+   * horizontally only, so this is the row the gesture started on and each task's
+   * own group is in its change.
+   */
+  row: GanttRow<G> | null;
+  group: GanttGroup<G> | null;
+  /** Rows travelled — 0 for a resize, or a move that spanned several rows. */
+  deltaRow: number;
+  /** Time travelled, after snapping. */
+  deltaTime: number;
+  /** The gesture was aborted rather than dropped; `changes` is then empty. */
+  cancelled: boolean;
+}
+
 export interface GanttChartProps<T = unknown, G = unknown> {
   tasks: readonly GanttTask<T>[];
   groups?: readonly GanttGroup<G>[];
@@ -51,10 +102,26 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   onTasksChange?: (tasks: GanttTask<T>[], changes: TaskChange[]) => void;
   /** Every committed drag/resize, whether controlled or not. */
   onChanges?: (changes: TaskChange[]) => void;
+  /**
+   * A drag or resize finished: which tasks moved, where the pointer let go, and
+   * the row and group they landed on. See {@link GanttDragEndEvent}.
+   *
+   * Called before the changes are applied — and before `onChanges` and
+   * `onTasksChange` — so it reports the gesture rather than its result. A
+   * cancelled gesture is reported too, with `cancelled: true` and no changes,
+   * which is the signal to tear down anything a `drag:start` put up.
+   */
+  onDragEnd?: (event: GanttDragEndEvent<T, G>) => void;
   onSelectionChange?: (selected: GanttId[]) => void;
   onTaskClick?: (task: GanttTask<T>) => void;
   onTaskDoubleClick?: (task: GanttTask<T>) => void;
   onRowToggle?: (row: GanttRow<G>, collapsed: boolean) => void;
+  /**
+   * A row was enabled or disabled from the gutter button (or from the engine).
+   * A disabled row keeps its bars but ignores every interaction with them; seed
+   * the state with `group.disabled`.
+   */
+  onRowDisabledChange?: (row: GanttRow<G>, disabled: boolean) => void;
   onViewportChange?: (viewport: ViewportState) => void;
 
   itemRenderer?: GanttItemRenderer<T, G>;
@@ -77,11 +144,27 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   rowMenuItems?: (row: GanttRow<G>, engine: GanttEngine<T, G>) => GanttMenuItem[];
   /** Custom tooltip body; `false` disables the tooltip. */
   tooltip?: ((context: GanttTooltipContext<T, G>) => ReactNode | null) | false;
+  /**
+   * Let the pointer into the tooltip, so its content can be hovered, selected
+   * and clicked — the only way a link or a button in a custom body is reachable.
+   * The tooltip stays up while the pointer is inside it, and the wheel is passed
+   * through to the plot underneath so scrolling and zooming still work over it.
+   *
+   * On by default. Pass `false` for a tooltip that is only a label and never
+   * stands between the pointer and a bar.
+   */
+  tooltipInteractive?: boolean;
 
   showHeader?: boolean;
   showRowGutter?: boolean;
   /** The gutter's per-row "more options" button. On by default. */
   showRowMenu?: boolean;
+  /**
+   * The gutter's per-row enable/disable button, drawn right after the label. On
+   * by default; pass `false` for a chart where rows cannot be switched off from
+   * the UI (`engine.setRowDisabled` still works).
+   */
+  showRowEnableToggle?: boolean;
   showScrollbar?: boolean;
   showGrid?: boolean;
   showRowBands?: boolean;
@@ -156,6 +239,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     showHeader = true,
     showRowGutter = true,
     showRowMenu = true,
+    showRowEnableToggle = true,
     showScrollbar = true,
     showGrid,
     showRowBands,
@@ -167,6 +251,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     weekStartsOn,
     renderer,
     tooltip,
+    tooltipInteractive = true,
   } = props;
 
   const theme = useMemo(() => resolveTheme(themeInput), [themeInput]);
@@ -203,7 +288,9 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
 
   useEffect(() => {
     const offs = [
-      engine.on("drag:end", ({ changes, cancelled }) => {
+      engine.on("drag:end", ({ drag, changes, cancelled }) => {
+        const onDragEnd = handlers.current.onDragEnd;
+        if (onDragEnd) onDragEnd(dragEndEvent(engine, drag, changes, cancelled));
         if (cancelled || changes.length === 0) return;
         handlers.current.onChanges?.(changes);
         const onTasksChange = handlers.current.onTasksChange;
@@ -217,6 +304,9 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
       engine.on("task:dblclick", ({ task }) => handlers.current.onTaskDoubleClick?.(task)),
       engine.on("row:toggle", ({ row, collapsed }) =>
         handlers.current.onRowToggle?.(row, collapsed),
+      ),
+      engine.on("row:disable", ({ row, disabled }) =>
+        handlers.current.onRowDisabledChange?.(row, disabled),
       ),
       engine.on("viewport:change", (viewport) => handlers.current.onViewportChange?.(viewport)),
     ];
@@ -326,6 +416,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             width={gutterWidth}
             renderRow={props.renderRow}
             showRowMenu={showRowMenu}
+            showRowEnableToggle={showRowEnableToggle}
             rowMenuItems={props.rowMenuItems}
           />
         ) : null}
@@ -349,6 +440,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
               theme={theme}
               locale={locale}
               render={tooltip ?? undefined}
+              interactive={tooltipInteractive}
             />
           )}
         </div>
@@ -384,4 +476,43 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
       />
     </div>
   );
+}
+
+/**
+ * The engine's `drag:end` payload, plus the two things it does not carry.
+ *
+ * The drop time comes off the pointer's own x — the gesture's `deltaTime` is
+ * snapped, the pointer is not. The row is resolved from the group the origin
+ * task *ended up in*, not from what the pointer was over: a drop on a disabled
+ * row leaves the tasks where they were, and the report has to say so.
+ */
+function dragEndEvent<T, G>(
+  engine: GanttEngine<T, G>,
+  drag: DragState,
+  changes: TaskChange[],
+  cancelled: boolean,
+): GanttDragEndEvent<T, G> {
+  const tasks: GanttTask<T>[] = [];
+  for (const change of changes) {
+    const task = engine.getTask(change.id);
+    if (task) tasks.push(task);
+  }
+
+  // A gesture that changed nothing still landed somewhere: the row it began on.
+  const landed = changes.find((change) => change.id === drag.originTaskId) ?? changes[0];
+  const groupId = landed ? landed.groupId : engine.getTask(drag.originTaskId)?.groupId;
+  const row = groupId === undefined ? null : engine.getRow(groupId);
+
+  return {
+    tasks,
+    changes,
+    mode: drag.mode,
+    point: drag.currentPoint,
+    time: engine.viewport.pxToTime(drag.currentPoint.x),
+    row,
+    group: row ? row.group : null,
+    deltaRow: drag.deltaRow,
+    deltaTime: drag.deltaTime,
+    cancelled,
+  };
 }

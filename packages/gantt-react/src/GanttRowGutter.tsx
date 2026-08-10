@@ -23,6 +23,12 @@ export interface GanttRowGutterProps<T, G> {
    */
   showRowMenu?: boolean;
   /**
+   * Show the per-row enable/disable button, drawn straight after the label. A
+   * disabled row keeps its bars on screen but ignores every interaction with
+   * them — see {@link GanttRow.disabled}. Default true.
+   */
+  showRowEnableToggle?: boolean;
+  /**
    * Items for that menu. Called once per *visible* row during render purely to
    * decide whether the button is worth showing — return an empty array to leave
    * a row without one — so keep it cheap and free of side effects.
@@ -46,6 +52,7 @@ export function GanttRowGutter<T, G>({
   width,
   renderRow,
   showRowMenu = true,
+  showRowEnableToggle = true,
   rowMenuItems,
 }: GanttRowGutterProps<T, G>): JSX.Element {
   const { viewport, hoveredRowIndex, menuRowIndex } = useEngineState(
@@ -55,6 +62,9 @@ export function GanttRowGutter<T, G>({
       hoveredRowIndex: state.hoveredRowIndex,
       // Any layout change (data, collapse, metrics) reshapes the row list.
       layoutRevision: state.layoutRevision,
+      // Disabling a row is deliberately *not* a layout change, so the set is
+      // watched on its own to repaint the rows it affects.
+      disabled: state.disabled,
       // Which row's options menu is open, so its button stays visible and
       // reports the right `aria-expanded` while the menu is up.
       menuRowIndex:
@@ -85,13 +95,17 @@ export function GanttRowGutter<T, G>({
           className={[
             'gantt-gutter__row',
             row.odd ? 'is-odd' : 'is-even',
-            hoveredRowIndex === row.row.index ? 'is-hovered' : '',
+            hoveredRowIndex === row.row.index && !row.disabled ? 'is-hovered' : '',
+            row.disabled ? 'is-disabled' : '',
           ]
             .filter(Boolean)
             .join(' ')}
           style={{ top: row.y, height: row.height }}
           onPointerEnter={() => engine.setHovered(null, row.row.index)}
-          onDoubleClick={() => engine.events.emit('row:dblclick', { row: row.row, position: { x: 0, y: row.y } })}
+          onDoubleClick={() => {
+            if (row.disabled) return;
+            engine.events.emit('row:dblclick', { row: row.row, position: { x: 0, y: row.y } });
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
             // Plot-space position, like every other opener; the menu itself
@@ -122,6 +136,7 @@ export function GanttRowGutter<T, G>({
               <span className="gantt-gutter__text" title={row.label}>
                 {row.label}
               </span>
+              {showRowEnableToggle ? <RowEnableButton engine={engine} row={row} /> : null}
               {/*
                 Only asked of a caller-supplied factory: the built-in items are
                 never empty, so the default path must not pay for a per-row,
@@ -144,6 +159,51 @@ export function GanttRowGutter<T, G>({
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * The per-row enable/disable button.
+ *
+ * Sits directly after the label, and behaves like the options button next to
+ * it: revealed on row hover or focus so an untouched gutter stays quiet. The
+ * exception is a row that is already off, where the button is the only way back
+ * and therefore always visible.
+ */
+function RowEnableButton<T, G>({
+  engine,
+  row,
+}: {
+  engine: GanttEngine<T, G>;
+  row: AxisRowDescriptor<G>;
+}): JSX.Element {
+  const off = row.disabled;
+  return (
+    <button
+      type="button"
+      className={`gantt-gutter__power${off ? ' is-off' : ''}`}
+      aria-label={off ? `Enable ${row.label}` : `Disable ${row.label}`}
+      aria-pressed={!off}
+      title={off ? 'Row disabled — interactions ignored' : 'Disable row'}
+      onClick={(event) => {
+        event.stopPropagation();
+        engine.toggleRowDisabled(row.row.group.id);
+      }}
+      // The row's own double-click means something else entirely.
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      {/* Drawn rather than typed: no font ships a power glyph reliably. */}
+      <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
+        <path
+          d="M4.5 4.6a4.8 4.8 0 1 0 7 0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+        <path d="M8 1.8v5.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    </button>
   );
 }
 

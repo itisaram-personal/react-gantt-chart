@@ -86,7 +86,9 @@ const adapter = new GanttEChartsAdapter(engine, {
 });
 ```
 
-Returning `null` skips a bar.
+Returning `null` skips a bar. `state` also carries `disabled` — true when the
+bar's row has been switched off, which the default renderer draws as a faded bar
+and the adapter enforces by ignoring pointer input over that row.
 
 ## Time scale
 

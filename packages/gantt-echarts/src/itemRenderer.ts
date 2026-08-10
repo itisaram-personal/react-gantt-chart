@@ -49,6 +49,18 @@ const MIN_LABEL_WIDTH = 30;
 const LABEL_PADDING = 6;
 
 /**
+ * Bars on a disabled row are faded rather than hidden: the row still shows what
+ * it holds, while reading as out of reach — which is exactly what it is.
+ */
+const DISABLED_OPACITY = 0.4;
+
+/** Bar opacity for the current interaction state. */
+function itemOpacity(state: { disabled: boolean; dragging: boolean }): number {
+  if (state.disabled) return DISABLED_OPACITY;
+  return state.dragging ? 0.72 : 1;
+}
+
+/**
  * The built-in look: rounded bars, diamond milestones, an optional progress
  * fill, and a label clipped to the on-screen part of the bar.
  */
@@ -87,7 +99,7 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
       fill,
       stroke,
       lineWidth,
-      opacity: state.dragging ? 0.72 : 1,
+      opacity: itemOpacity(state),
     },
     silent: true,
   };
@@ -105,7 +117,11 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
           },
           // A darkened overlay reads as "done" against any palette colour without
           // needing a second colour per series.
-          style: { fill: theme.dark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.26)" },
+          style: {
+            fill: theme.dark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.26)",
+            // Faded with the bar it sits on, or it would read as full progress.
+            opacity: itemOpacity(state),
+          },
           silent: true,
         } satisfies GanttElement)
       : null;
@@ -121,6 +137,7 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
             x: clipped.x + LABEL_PADDING,
             y: geometry.y + geometry.height / 2,
             fill: textColor ?? theme.colors.taskText,
+            opacity: itemOpacity(state),
             font: fontShorthand(theme.font.weight, theme.font.labelSize, theme.font.family),
             textVerticalAlign: "middle",
             textAlign: "left",
@@ -165,7 +182,7 @@ function renderMilestone<T, G>(context: GanttRenderContext<T, G>): GanttElement 
           ? theme.colors.hoverStroke
           : theme.colors.taskStroke,
       lineWidth: state.selected ? theme.metrics.selectedStrokeWidth : theme.metrics.itemStrokeWidth,
-      opacity: state.dragging ? 0.72 : 1,
+      opacity: itemOpacity(state),
     },
     silent: true,
   };
@@ -179,6 +196,7 @@ function renderMilestone<T, G>(context: GanttRenderContext<T, G>): GanttElement 
             x: cx + half + 4,
             y: cy,
             fill: theme.colors.text,
+            opacity: itemOpacity(state),
             font: fontShorthand(theme.font.weight, theme.font.labelSize, theme.font.family),
             textVerticalAlign: "middle",
             textAlign: "left",

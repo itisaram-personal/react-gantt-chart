@@ -52,6 +52,7 @@ const undo = () => {
 | `dependencies` | arrow links; installs the dependency plugin for you |
 | `plugins` | your own engine plugins |
 | `tooltip` | custom body, or `false` to disable |
+| `tooltipInteractive` | let the pointer into the tooltip (default); `false` for a label that never takes a click |
 | `contextMenuItems` | replace the default right-click menu |
 | `rowMenuItems` | items for the gutter's per-row ⋯ button; `[]` drops it for that row |
 | `renderRow` | replace gutter row rendering |
@@ -61,10 +62,37 @@ const undo = () => {
 | `engineRef` | the engine, for toolbars, exports and undo |
 | `exportRef` | a PNG exporter for this chart (see below) |
 | `exportOptions` | defaults for every export call |
-| `showHeader` / `showRowGutter` / `showRowMenu` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
+| `showHeader` / `showRowGutter` / `showRowMenu` / `showRowEnableToggle` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
-`onViewportChange`.
+`onRowDisabledChange`, `onViewportChange`, and `onDragEnd` (below).
+
+## When a drag ends
+
+`onChanges` says what to write. `onDragEnd` says what the *gesture* did — the
+tasks it moved, where the pointer let go, and the row and group they landed on:
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  groups={groups}
+  onDragEnd={(event) => {
+    if (event.cancelled) return;
+    console.log(
+      event.tasks.map((task) => task.id),  // moved, still holding their old values
+      new Date(event.time),                // time under the pointer at the drop
+      event.group?.id,                     // group they landed in, and `event.row`
+      event.changes,                       // the edits: new start/end/groupId + `previous`
+    );
+  }}
+/>
+```
+
+It fires before the changes are applied — and before `onChanges` and
+`onTasksChange` — so `event.tasks` still holds the values the drag started from;
+the new ones are in `event.changes[i]`, in the same order. A cancelled gesture is
+reported too, with `cancelled: true` and nothing in `changes`. Resizes come
+through the same handler, with `mode` naming the handle that was dragged.
 
 ## Row options
 
@@ -93,6 +121,32 @@ click. `showRowMenu={false}` removes the button everywhere.
 Pass `tasks`/`groups`/`options` as stable references (`useMemo`) — a new array
 identity means a re-normalize. `options` is compared by value, so an inline
 literal is safe there.
+
+## Disabling a row
+
+Right after each row's label sits a power button that switches the row off. A
+disabled row keeps its bars — faded, so it still reads as data — but ignores
+every interaction with them: selection, clicks, double-clicks, drag, resize,
+marquee and hover, and no drag from elsewhere can drop a task onto it. Its own
+controls keep working, so it can still be collapsed, right-clicked and switched
+back on.
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  // `disabled` seeds the state, the same way `collapsed` does.
+  groups={[{ id: 'team-a', label: 'Team A', disabled: true }]}
+  onRowDisabledChange={(row, disabled) => persist(row.group.id, disabled)}
+/>
+```
+
+From the engine: `engine.setRowDisabled(id, true)`, `engine.toggleRowDisabled(id)`,
+`engine.isRowDisabled(id)`, `engine.enableAllRows()`, and the `row:disable` event.
+`showRowEnableToggle={false}` drops the button without giving up the API.
+
+The rule is about *input*, not data: `selection.set`, `applyChanges` and every
+other explicit call still reach a disabled row. Custom item renderers get
+`state.disabled` to draw it their own way, and `renderRow` gets `row.disabled`.
 
 ## PNG export
 

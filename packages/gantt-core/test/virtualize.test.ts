@@ -110,7 +110,9 @@ describe('virtualization', () => {
   });
 
   it('reuses the previous frame when nothing relevant changed', () => {
-    const { tasks, groups } = generate({ groupCount: 5, tasksPerGroup: 20, seed: 5, domain: [0, 1000] });
+    // Enough rows to overflow the 300px plot — with uniform row heights five
+    // rows fit inside it, and a scroll that clamps to zero would prove nothing.
+    const { tasks, groups } = generate({ groupCount: 20, tasksPerGroup: 5, seed: 5, domain: [0, 1000] });
     const engine = new GanttEngine({ tasks, groups, size: { width: 800, height: 300 }, options: EXACT });
     engine.viewport.setTimeRange(0, 500);
 

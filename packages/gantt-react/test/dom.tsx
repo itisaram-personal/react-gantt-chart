@@ -219,6 +219,18 @@ export function run(fn: () => void): void {
   });
 }
 
+/**
+ * Let real timers run for `ms`, with any React state they schedule applied.
+ *
+ * Real rather than faked: the chart renders off an animation frame, and faking
+ * timers stops that as well as the one under test.
+ */
+export async function wait(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
 /** Dispatch an event jsdom does not construct natively (pointer events). */
 export function dispatch(
   target: EventTarget,
