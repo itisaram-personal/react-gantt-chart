@@ -16,6 +16,7 @@
   "scripts": {
     "build": "npm run build -w @gantt-chart/core && npm run build -w @gantt-chart/themes && npm run build -w @gantt-chart/echarts && npm run build -w @gantt-chart/react",
     "dev": "npm run dev -w @gantt-chart/demo",
+    "publish-all-gantts": "node scripts/publish-all-gantts.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
