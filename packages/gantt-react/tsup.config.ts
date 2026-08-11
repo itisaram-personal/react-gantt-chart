@@ -15,6 +15,7 @@ export default defineConfig({
     'echarts',
     'echarts/core',
     'echarts/charts',
+    'echarts/components',
     'echarts/renderers',
     'react',
     'react-dom',

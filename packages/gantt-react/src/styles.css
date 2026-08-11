@@ -458,12 +458,18 @@
   min-width: 0;
 }
 
+/*
+ * Each bar is a container for an ECharts `dataZoom` slider, so everything inside
+ * it — track, window, handles, overview — is drawn by the chart and themed
+ * through the option, not from here. What is left is the box the slider fills and
+ * the one edge that joins it to the plot.
+ */
 .gantt-zoom {
   position: relative;
   flex: 0 0 auto;
   overflow: hidden;
+  /* The slider handles its own gestures; the browser must not also scroll. */
   touch-action: none;
-  cursor: pointer;
 }
 
 .gantt-zoom--horizontal {
@@ -474,85 +480,6 @@
 .gantt-zoom--vertical {
   height: 100%;
   border-left: 1px solid var(--gantt-border);
-}
-
-/* Behind the window, and never a pointer target — the track handles clicks. */
-.gantt-zoom__overview {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.gantt-zoom__density {
-  display: flex;
-  align-items: flex-end;
-  width: 100%;
-  height: 100%;
-  gap: 0;
-}
-
-.gantt-zoom__density-bar {
-  flex: 1 1 0;
-  min-width: 0;
-  opacity: 0.7;
-}
-
-.gantt-zoom__window {
-  position: absolute;
-  opacity: 0.55;
-  cursor: grab;
-}
-
-.gantt-zoom__window:active {
-  cursor: grabbing;
-}
-
-.gantt-zoom--horizontal .gantt-zoom__window {
-  top: 2px;
-  bottom: 2px;
-  border-radius: 3px;
-}
-
-.gantt-zoom--vertical .gantt-zoom__window {
-  left: 2px;
-  right: 2px;
-  border-radius: 3px;
-}
-
-.gantt-zoom__handle {
-  position: absolute;
-  border-radius: 2px;
-}
-
-/* Handles overhang the window slightly so they stay grabbable when it is thin. */
-.gantt-zoom--horizontal .gantt-zoom__handle {
-  top: -2px;
-  bottom: -2px;
-  width: 5px;
-  cursor: ew-resize;
-}
-
-.gantt-zoom--horizontal .gantt-zoom__handle--start {
-  left: -2px;
-}
-
-.gantt-zoom--horizontal .gantt-zoom__handle--end {
-  right: -2px;
-}
-
-.gantt-zoom--vertical .gantt-zoom__handle {
-  left: -2px;
-  right: -2px;
-  height: 5px;
-  cursor: ns-resize;
-}
-
-.gantt-zoom--vertical .gantt-zoom__handle--start {
-  top: -2px;
-}
-
-.gantt-zoom--vertical .gantt-zoom__handle--end {
-  bottom: -2px;
 }
 
 /* --------------------------------------------------------------- tooltip */

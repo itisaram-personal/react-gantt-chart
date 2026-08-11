@@ -1,170 +1,247 @@
-import { useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { clamp, shallowEqual, type GanttEngine, type GanttTheme } from '@gantt-chart/core';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { LineChart } from 'echarts/charts';
+import { DataZoomSliderComponent, GridComponent } from 'echarts/components';
+import { init, use } from 'echarts/core';
+import { CanvasRenderer, SVGRenderer } from 'echarts/renderers';
+import { shallowEqual, type GanttEngine, type GanttTheme } from '@gantt-chart/core';
+import {
+  buildRowZoomOption,
+  buildTimeZoomOption,
+  rowZoomLaneHeight,
+  rowZoomScrollTop,
+  rowZoomWindow,
+  taskDensity,
+  timeZoomRange,
+  timeZoomWindow,
+  type GanttZoomOption,
+  type GanttZoomWindow,
+} from '@gantt-chart/echarts';
 import { useEngineState } from './useEngineState';
+import { useElementSize } from './useResizeObserver';
 
 /**
- * Zoom bars for both axes.
+ * Zoom bars for both axes, each an ECharts `dataZoom` slider.
  *
- * These are ECharts-`dataZoom`-shaped controls built as ordinary DOM, for the
- * same reason the scrollbar is: the engine is the only thing allowed to move the
- * camera, so a real `dataZoom` component would be a second owner of pan/zoom and
- * the two would fight. Everything here reads the viewport and writes back
- * through `viewport.setTimeRange` / `viewport.scrollTo` / `setOptions`.
+ * A slider lives on its own chart rather than on the plot: the plot's series is
+ * `coordinateSystem: 'none'` and has no axis for a dataZoom to bind to, and a
+ * slider sharing the plot's canvas would lay ECharts' pointer handling over the
+ * plot's own drag, marquee and wheel gestures.
  *
- * Both bars share {@link ZoomBar}, which owns the track/window/handle DOM and
- * the pointer maths in *fractions of the track*. Each axis then only has to say
- * what a fraction means.
+ * The engine is still the only thing that moves the camera, and the sliders are
+ * wired so it stays that way — see {@link ZoomSlider}. The mapping between a
+ * slider window and the viewport lives in `@gantt-chart/echarts`, in pure
+ * functions; what is left here is the chart's lifecycle and the two directions
+ * of the sync.
  */
 
-/** Which part of the window a drag grabbed. */
-type Grip = 'start' | 'end' | 'body';
+/*
+ * The slider and the axis it needs, and nothing else ECharts has to offer.
+ *
+ * Registered at module scope, as the plot's own series is: it therefore costs an
+ * app the slider, grid and line components whether or not it turns a zoom bar on.
+ * Deferring it would mean a dynamic import — the registration has to happen
+ * before the first `setOption`, and importing inside an effect still bundles the
+ * modules — which is not worth an async hole in the first frame.
+ */
+use([LineChart, DataZoomSliderComponent, GridComponent, CanvasRenderer, SVGRenderer]);
 
-/** Smallest window a handle drag may leave, so it never collapses to nothing. */
-const MIN_WINDOW_PX = 16;
-
-interface ZoomBarProps {
-  orientation: 'horizontal' | 'vertical';
-  /** Window edges as fractions of the track, 0..1. */
-  from: number;
-  to: number;
-  /** Height of a horizontal bar, width of a vertical one. */
-  thickness: number;
-  theme: GanttTheme;
-  label: string;
-  /** Overview painted behind the window. Must not take pointer events. */
-  children?: ReactNode;
-  onGripDown?: (grip: Grip) => void;
-  /**
-   * Next window, in fractions. Always computed from the window as it was when
-   * the drag started, never from the live props — otherwise re-rendering
-   * mid-drag would feed the previous result back in and the window would drift.
-   */
-  onWindow: (from: number, to: number, grip: Grip) => void;
+/** The bits of an ECharts instance a slider chart is driven through. */
+interface ZoomChart {
+  setOption(option: unknown, opts?: unknown): void;
+  getOption(): { dataZoom?: { start?: number; end?: number }[] } | undefined;
+  on(event: string, handler: (params: unknown) => void): void;
+  resize(opts?: unknown): void;
+  dispose(): void;
 }
 
-function ZoomBar({
-  orientation,
-  from,
-  to,
-  thickness,
-  theme,
-  label,
-  children,
-  onGripDown,
+/**
+ * Window differences under this many percent are not written to the slider.
+ *
+ * The window the engine settled on and the one the slider already shows are
+ * normally the same number arrived at from two directions, so without a
+ * tolerance every viewport change would `setOption` for nothing.
+ */
+const WINDOW_EPSILON = 0.01;
+
+interface ZoomSliderProps {
+  /** Everything but the window: axes, styling, and the overview series. */
+  option: GanttZoomOption;
+  /** The window the engine is actually showing, written back when it drifts. */
+  window: GanttZoomWindow;
+  /** The slider moved. The engine still has the last word on what that means. */
+  onWindow: (window: GanttZoomWindow) => void;
+  renderer: 'canvas' | 'svg';
+  className: string;
+  style: CSSProperties;
+  label: string;
+}
+
+/**
+ * One slider-only chart, kept in sync with the engine in both directions.
+ *
+ * Slider → engine: every `datazoom` event is handed to `onWindow`, which maps it
+ * onto the viewport. The engine clamps as it sees fit, so what comes out is not
+ * always what went in.
+ *
+ * Engine → slider: whenever the engine's window differs from the one on screen,
+ * it is written back with `setOption` — which, unlike `dispatchAction`, fires no
+ * `datazoom` event and so cannot feed its own output back in.
+ *
+ * That write-back is suspended while the slider is being dragged. It is the only
+ * moment the two can legitimately disagree — the engine has clamped, but the
+ * pointer is still holding a handle out past the limit — and correcting it
+ * mid-gesture would mean pulling the handle out from under the pointer on every
+ * frame. The gesture ends, and the engine's answer is put back on screen.
+ */
+function ZoomSlider({
+  option,
+  window: engineWindow,
   onWindow,
-}: ZoomBarProps): JSX.Element {
-  const horizontal = orientation === 'horizontal';
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const drag = useRef<{ grip: Grip; pointer: number; track: number; from: number; to: number } | null>(null);
+  renderer,
+  className,
+  style,
+  label,
+}: ZoomSliderProps): JSX.Element {
+  const [containerRef, size] = useElementSize<HTMLDivElement>();
+  const chartRef = useRef<ZoomChart | null>(null);
+  /** The window last known to be on screen, so redundant writes are skipped. */
+  const shown = useRef<GanttZoomWindow | null>(null);
+  const dragging = useRef(false);
 
-  const axis = (event: { clientX: number; clientY: number }): number =>
-    horizontal ? event.clientX : event.clientY;
+  // Read by handlers that outlive the render that created them.
+  const latest = useRef({ onWindow, window: engineWindow });
+  latest.current = { onWindow, window: engineWindow };
 
-  const begin =
-    (grip: Grip) =>
-    (event: ReactPointerEvent<HTMLElement>): void => {
-      const track = trackRef.current;
-      if (!track) return;
-      // The track's own handler pages the window; a grip drag must not also.
-      event.preventDefault();
-      event.stopPropagation();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      const rect = track.getBoundingClientRect();
-      drag.current = {
-        grip,
-        pointer: axis(event),
-        track: Math.max(1, horizontal ? rect.width : rect.height),
-        from,
-        to,
-      };
-      onGripDown?.(grip);
+  const write = useRef<(next: GanttZoomWindow) => void>(() => {});
+  write.current = (next: GanttZoomWindow): void => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const current = shown.current;
+    if (
+      current &&
+      Math.abs(current.start - next.start) < WINDOW_EPSILON &&
+      Math.abs(current.end - next.end) < WINDOW_EPSILON
+    ) {
+      return;
+    }
+    shown.current = next;
+    chart.setOption({ dataZoom: [{ start: next.start, end: next.end }] });
+  };
+
+  useLayoutEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const chart = init(element, null, {
+      renderer,
+      width: element.clientWidth || 1,
+      height: element.clientHeight || 1,
+    }) as unknown as ZoomChart;
+
+    chart.on('datazoom', (params) => {
+      const next = eventWindow(params, chart);
+      if (!next) return;
+      shown.current = next;
+      latest.current.onWindow(next);
+    });
+
+    chartRef.current = chart;
+    return () => {
+      chart.dispose();
+      chartRef.current = null;
+      shown.current = null;
+    };
+    // `renderer` is structural: changing it rebuilds the chart.
+  }, [renderer, containerRef]);
+
+  // Ordered after the effect above so the first option reaches a live chart.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setOption(option);
+    shown.current = { start: option.dataZoom[0].start, end: option.dataZoom[0].end };
+    // The option carries the window it was built with, which may already be
+    // stale; the effect below re-asserts the live one.
+  }, [option]);
+
+  useEffect(() => {
+    if (!dragging.current) write.current(engineWindow);
+  }, [option, engineWindow.start, engineWindow.end]);
+
+  useEffect(() => {
+    if (size.width > 0 && size.height > 0) {
+      chartRef.current?.resize({ width: size.width, height: size.height });
+    }
+  }, [size.width, size.height]);
+
+  /*
+   * Brackets the drag for the write-back above. `pointerup` is watched on the
+   * document rather than here, because a drag very often ends with the pointer
+   * outside the strip it started in — which also means the listener can outlive
+   * the gesture, so `endGesture` is held for unmount to call.
+   */
+  const endGesture = useRef<(() => void) | null>(null);
+  useEffect(() => () => endGesture.current?.(), []);
+
+  const beginGesture = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (dragging.current) return;
+    dragging.current = true;
+
+    const target = event.currentTarget.ownerDocument ?? document;
+    const end = (): void => {
+      dragging.current = false;
+      endGesture.current = null;
+      target.removeEventListener('pointerup', end);
+      target.removeEventListener('pointercancel', end);
+      // Whatever the engine made of the gesture is what should be on screen.
+      write.current(latest.current.window);
     };
 
-  const move = (event: ReactPointerEvent<HTMLElement>): void => {
-    const origin = drag.current;
-    if (!origin) return;
-    const delta = (axis(event) - origin.pointer) / origin.track;
-    const min = MIN_WINDOW_PX / origin.track;
-
-    if (origin.grip === 'body') {
-      const width = origin.to - origin.from;
-      const start = clamp(origin.from + delta, 0, Math.max(0, 1 - width));
-      onWindow(start, start + width, 'body');
-    } else if (origin.grip === 'start') {
-      onWindow(clamp(origin.from + delta, 0, Math.max(0, origin.to - min)), origin.to, 'start');
-    } else {
-      onWindow(origin.from, clamp(origin.to + delta, Math.min(1, origin.from + min), 1), 'end');
-    }
+    endGesture.current = end;
+    target.addEventListener('pointerup', end);
+    target.addEventListener('pointercancel', end);
   };
-
-  const finish = (event: ReactPointerEvent<HTMLElement>): void => {
-    if (!drag.current) return;
-    drag.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const span = Math.max(0, to - from);
-  const windowStyle = horizontal
-    ? { left: `${from * 100}%`, width: `${span * 100}%` }
-    : { top: `${from * 100}%`, height: `${span * 100}%` };
 
   return (
     <div
-      ref={trackRef}
-      className={`gantt-zoom gantt-zoom--${orientation}`}
-      style={{
-        [horizontal ? 'height' : 'width']: thickness,
-        background: theme.colors.scrollbarTrack,
-        borderColor: theme.colors.border,
-      }}
-      onPointerDown={(event) => {
-        // A click on bare track centres the window on the pointer.
-        if (drag.current) return;
-        const rect = event.currentTarget.getBoundingClientRect();
-        const length = Math.max(1, horizontal ? rect.width : rect.height);
-        const at = (axis(event) - (horizontal ? rect.left : rect.top)) / length;
-        const start = clamp(at - span / 2, 0, Math.max(0, 1 - span));
-        onWindow(start, start + span, 'body');
-      }}
-    >
-      {children ? <div className="gantt-zoom__overview">{children}</div> : null}
-
-      <div
-        className="gantt-zoom__window"
-        style={{ ...windowStyle, background: theme.colors.scrollbarThumb, borderColor: theme.colors.accent }}
-        role="slider"
-        aria-label={label}
-        aria-orientation={horizontal ? 'horizontal' : 'vertical'}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(from * 100)}
-        tabIndex={-1}
-        onPointerDown={begin('body')}
-        onPointerMove={move}
-        onPointerUp={finish}
-        onPointerCancel={finish}
-      >
-        <div
-          className="gantt-zoom__handle gantt-zoom__handle--start"
-          style={{ background: theme.colors.accent }}
-          onPointerDown={begin('start')}
-          onPointerMove={move}
-          onPointerUp={finish}
-          onPointerCancel={finish}
-        />
-        <div
-          className="gantt-zoom__handle gantt-zoom__handle--end"
-          style={{ background: theme.colors.accent }}
-          onPointerDown={begin('end')}
-          onPointerMove={move}
-          onPointerUp={finish}
-          onPointerCancel={finish}
-        />
-      </div>
-    </div>
+      ref={containerRef}
+      className={className}
+      style={style}
+      role="group"
+      aria-label={label}
+      onPointerDown={beginGesture}
+    />
   );
+}
+
+/**
+ * The window a `datazoom` event reports.
+ *
+ * The slider sends its own `start`/`end` percentages, so normally the payload is
+ * the whole answer. The fallback covers the payload shapes it does not
+ * necessarily control: a batched event when several dataZooms move together, and
+ * one carrying values rather than percentages.
+ */
+function eventWindow(params: unknown, chart: ZoomChart): GanttZoomWindow | null {
+  type Reported = { start?: number; end?: number };
+  const payload = params as (Reported & { batch?: Reported[] }) | null;
+  const source = payload?.batch?.[0] ?? payload;
+  if (typeof source?.start === 'number' && typeof source?.end === 'number') {
+    return { start: source.start, end: source.end };
+  }
+
+  const settled = chart.getOption()?.dataZoom?.[0];
+  if (typeof settled?.start === 'number' && typeof settled?.end === 'number') {
+    return { start: settled.start, end: settled.end };
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ x axis */
@@ -174,25 +251,24 @@ export interface GanttTimeZoomBarProps<T, G> {
   theme: GanttTheme;
   /** Bar height in px. */
   height?: number;
-  /** Draw a task-density histogram behind the window. */
+  /** Draw a task-density overview behind the window. */
   overview?: boolean;
+  renderer?: 'canvas' | 'svg';
 }
 
-/** How many buckets the density overview is summarised into. */
-const DENSITY_BUCKETS = 240;
-
 /**
- * Horizontal zoom bar over the whole time domain.
+ * Horizontal `dataZoom` slider over the whole time domain.
  *
- * The window is the visible time range, so dragging its body pans and dragging
- * a handle zooms. `setTimeRange` already clamps to the domain and to
+ * The window is the visible time range, so dragging its body pans and dragging a
+ * handle zooms. `setTimeRange` already clamps to the domain and to
  * `min`/`maxTimeSpan`, so nothing here needs to re-check those bounds.
  */
 export function GanttTimeZoomBar<T, G>({
   engine,
   theme,
-  height = 26,
+  height = 32,
   overview = true,
+  renderer = 'canvas',
 }: GanttTimeZoomBarProps<T, G>): JSX.Element | null {
   const { viewport, dataRevision } = useEngineState(
     engine,
@@ -201,68 +277,40 @@ export function GanttTimeZoomBar<T, G>({
   );
 
   const [domainStart, domainEnd] = engine.getDomain();
-  const domainSpan = domainEnd - domainStart;
 
   const density = useMemo(
-    () => (overview ? timeDensity(engine) : null),
+    () => (overview ? taskDensity(engine) : null),
     // Recomputed only when the dataset itself changes, not on pan or zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [engine, overview, dataRevision],
   );
 
-  if (domainSpan <= 0) return null;
+  const window = timeZoomWindow([domainStart, domainEnd], viewport);
 
-  const fraction = (time: number): number => clamp((time - domainStart) / domainSpan, 0, 1);
+  const option = useMemo(
+    () => buildTimeZoomOption({ domain: [domainStart, domainEnd], window, theme, density }),
+    // Structure only: the live window is synced separately, so rebuilding the
+    // option on every pan would be pure waste.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domainStart, domainEnd, theme, density],
+  );
+
+  if (domainEnd - domainStart <= 0) return null;
 
   return (
-    <ZoomBar
-      orientation="horizontal"
-      from={fraction(viewport.timeStart)}
-      to={fraction(viewport.timeEnd)}
-      thickness={height}
-      theme={theme}
-      label="Time range"
-      onWindow={(from, to) => {
-        engine.viewport.setTimeRange(domainStart + from * domainSpan, domainStart + to * domainSpan);
+    <ZoomSlider
+      option={option}
+      window={window}
+      onWindow={(next) => {
+        const range = timeZoomRange([domainStart, domainEnd], next);
+        engine.viewport.setTimeRange(range.start, range.end);
       }}
-    >
-      {density ? (
-        <div className="gantt-zoom__density">
-          {Array.from(density, (value, index) => (
-            <span
-              key={index}
-              className="gantt-zoom__density-bar"
-              style={{ height: `${Math.max(value * 100, value > 0 ? 4 : 0)}%`, background: theme.colors.gridLineStrong }}
-            />
-          ))}
-        </div>
-      ) : null}
-    </ZoomBar>
+      renderer={renderer}
+      className="gantt-zoom gantt-zoom--horizontal"
+      style={{ height, borderTopColor: theme.colors.border }}
+      label="Time range"
+    />
   );
-}
-
-/**
- * Task starts per bucket across the domain, normalised to 0..1.
- *
- * Bucketed by start alone rather than by covered span: this is a legibility aid
- * at 240px wide, and an O(n) pass keeps it affordable at 250K tasks.
- */
-function timeDensity<T, G>(engine: GanttEngine<T, G>): Float64Array {
-  const buckets = new Float64Array(DENSITY_BUCKETS);
-  const [start, end] = engine.getDomain();
-  const span = end - start;
-  if (span <= 0) return buckets;
-
-  const starts = engine.getDataModel().starts;
-  for (let i = 0; i < starts.length; i++) {
-    const bucket = Math.floor(((starts[i] - start) / span) * DENSITY_BUCKETS);
-    if (bucket >= 0 && bucket < DENSITY_BUCKETS) buckets[bucket]++;
-  }
-
-  let peak = 0;
-  for (let i = 0; i < DENSITY_BUCKETS; i++) if (buckets[i] > peak) peak = buckets[i];
-  if (peak > 0) for (let i = 0; i < DENSITY_BUCKETS; i++) buckets[i] /= peak;
-  return buckets;
 }
 
 /* ------------------------------------------------------------------ y axis */
@@ -274,27 +322,30 @@ export interface GanttRowZoomBarProps<T, G> {
   width?: number;
   minLaneHeight?: number;
   maxLaneHeight?: number;
+  renderer?: 'canvas' | 'svg';
 }
 
 /**
- * Vertical zoom bar over the rows.
+ * Vertical `dataZoom` slider over the rows.
  *
  * Dragging the body scrolls. Dragging a handle is a genuine vertical zoom: the
  * window says how much content should be on screen, and `metrics.laneHeight` is
- * rescaled so exactly that much fills the plot — so rows get taller as the
+ * rescaled so that exactly that much fills the plot — so rows get taller as the
  * window narrows.
  *
- * The window is tracked as a *fraction* of total content height rather than a
- * pixel offset. Rescaling lane heights changes `totalHeight`, so a pixel anchor
- * would slide out from under the drag; a fraction is very nearly invariant under
- * the rescale, which keeps the grabbed edge under the pointer.
+ * The window is a *fraction* of total content height rather than a pixel offset.
+ * Rescaling lane heights changes `totalHeight`, so a pixel anchor would slide out
+ * from under the drag; a fraction is very nearly invariant under the rescale,
+ * which keeps the grabbed edge under the pointer. `rowZoomLaneHeight` is the
+ * whole of that maths.
  */
 export function GanttRowZoomBar<T, G>({
   engine,
   theme,
-  width = 14,
+  width = 24,
   minLaneHeight = 6,
   maxLaneHeight = 120,
+  renderer = 'canvas',
 }: GanttRowZoomBarProps<T, G>): JSX.Element | null {
   const { viewport } = useEngineState(
     engine,
@@ -302,42 +353,44 @@ export function GanttRowZoomBar<T, G>({
     shallowEqual,
   );
 
-  // Captured on grip-down: the maths must not chase its own output.
-  const origin = useRef<{ laneHeight: number; totalHeight: number } | null>(null);
   const totalHeight = engine.totalHeight;
+  const window = rowZoomWindow({
+    scrollTop: viewport.scrollTop,
+    height: viewport.height,
+    totalHeight,
+  });
+
+  const option = useMemo(
+    () => buildRowZoomOption({ window, theme }),
+    // As on the time bar: structure only, and here that is only the styling —
+    // the axis is in fractions, so neither scrolling nor rescaling touches it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [theme],
+  );
 
   if (totalHeight <= 0 || viewport.height <= 0) return null;
 
-  const from = clamp(viewport.scrollTop / totalHeight, 0, 1);
-  const to = clamp((viewport.scrollTop + viewport.height) / totalHeight, from, 1);
-
   return (
-    <ZoomBar
-      orientation="vertical"
-      from={from}
-      to={to}
-      thickness={width}
-      theme={theme}
+    <ZoomSlider
+      option={option}
+      window={window}
+      onWindow={(next) => {
+        const laneHeight = rowZoomLaneHeight({
+          window: next,
+          height: viewport.height,
+          laneHeight: engine.getOptions().metrics.laneHeight,
+          totalHeight,
+          minLaneHeight,
+          maxLaneHeight,
+        });
+        if (laneHeight !== null) engine.setOptions({ metrics: { laneHeight } });
+        // Re-read: a rescale above moved every row.
+        engine.viewport.scrollTo(rowZoomScrollTop(next, engine.totalHeight));
+      }}
+      renderer={renderer}
+      className="gantt-zoom gantt-zoom--vertical"
+      style={{ width, borderLeftColor: theme.colors.border }}
       label="Row range"
-      onGripDown={() => {
-        origin.current = { laneHeight: engine.getOptions().metrics.laneHeight, totalHeight };
-      }}
-      onWindow={(nextFrom, nextTo, grip) => {
-        if (grip !== 'body') {
-          const base = origin.current ?? { laneHeight: engine.getOptions().metrics.laneHeight, totalHeight };
-          // Content the window covers, measured at the scale the drag began at.
-          const covered = Math.max(1, (nextTo - nextFrom) * base.totalHeight);
-          const laneHeight = clamp(
-            (base.laneHeight * viewport.height) / covered,
-            minLaneHeight,
-            maxLaneHeight,
-          );
-          // Rounded so a pixel-sized wobble does not churn the layout cache.
-          engine.setOptions({ metrics: { laneHeight: Math.round(laneHeight * 10) / 10 } });
-        }
-        // Re-read: the rescale above moved every row.
-        engine.viewport.scrollTo(nextFrom * engine.totalHeight);
-      }}
     />
   );
 }

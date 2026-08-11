@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { createRef } from 'react';
+import { getInstanceByDom, type EChartsType } from 'echarts/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GanttTask, TaskChange } from '@gantt-chart/core';
 import { darkTheme, lightTheme } from '@gantt-chart/themes';
 import type { GanttDragEndEvent } from '../src/GanttChart';
 import type { GanttExportApi } from '../src/useGanttExport';
-import { DAY, PLOT_HEIGHT, PLOT_WIDTH, T0, dispatch, drag, fixtureData, key, plotOf, renderChart, run, textsOf, wait } from './dom';
+import { DAY, PLOT_HEIGHT, PLOT_WIDTH, T0, dispatch, fixtureData, key, plotOf, renderChart, run, textsOf, wait } from './dom';
 
 /**
  * Geometry, with the layout stub in place (800×400 plot):
@@ -898,19 +899,47 @@ describe('dependencies', () => {
   });
 });
 
+/**
+ * The two `dataZoom` sliders.
+ *
+ * A gesture is exercised through the action a slider's own drag handler
+ * dispatches, rather than through synthesised pointer events on its canvas: the
+ * pixel maths on the way there belongs to ECharts, and what is under test either
+ * side of it is ours — the window a slider is given, and what the engine makes of
+ * the window it comes back with.
+ */
 describe('zoom bars', () => {
-  const windowOf = (container: HTMLElement, axis: 'horizontal' | 'vertical'): HTMLElement => {
-    const node = container.querySelector<HTMLElement>(`.gantt-zoom--${axis} .gantt-zoom__window`);
-    if (!node) throw new Error(`no ${axis} zoom window`);
-    return node;
+  type Window = { start: number; end: number };
+
+  const chartOf = (container: HTMLElement, axis: 'horizontal' | 'vertical'): EChartsType => {
+    const bar = container.querySelector<HTMLElement>(`.gantt-zoom--${axis}`);
+    if (!bar) throw new Error(`no ${axis} zoom bar`);
+    const chart = getInstanceByDom(bar);
+    if (!chart) throw new Error(`no chart on the ${axis} zoom bar`);
+    return chart;
   };
 
-  const handleOf = (container: HTMLElement, axis: 'horizontal' | 'vertical', edge: 'start' | 'end'): HTMLElement => {
-    const node = container.querySelector<HTMLElement>(
-      `.gantt-zoom--${axis} .gantt-zoom__handle--${edge}`,
-    );
-    if (!node) throw new Error(`no ${axis} ${edge} handle`);
-    return node;
+  /** The window a slider is showing, read straight off its own option. */
+  const windowOf = (container: HTMLElement, axis: 'horizontal' | 'vertical'): Window => {
+    const option = chartOf(container, axis).getOption() as {
+      dataZoom?: { start?: number; end?: number }[];
+    };
+    const zoom = option.dataZoom?.[0];
+    if (typeof zoom?.start !== 'number' || typeof zoom?.end !== 'number') {
+      throw new Error(`no window on the ${axis} slider`);
+    }
+    return { start: zoom.start, end: zoom.end };
+  };
+
+  /** Move a slider to a window, exactly as dragging it would. */
+  const moveTo = (
+    container: HTMLElement,
+    axis: 'horizontal' | 'vertical',
+    start: number,
+    end: number,
+  ): void => {
+    const chart = chartOf(container, axis);
+    run(() => chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, start, end }));
   };
 
   it('are off unless asked for', () => {
@@ -920,7 +949,7 @@ describe('zoom bars', () => {
     expect(container.querySelector('.gantt-zoom--vertical')).toBeNull();
   });
 
-  it('draws the visible time range as the window', () => {
+  it('shows the visible time range as the slider window', () => {
     const { tasks, groups } = fixtureData();
     const { container, engine } = mount({ tasks, groups, showTimeZoomBar: true });
 
@@ -928,12 +957,26 @@ describe('zoom bars', () => {
     const span = domainEnd - domainStart;
     const { timeStart, timeEnd } = engine.viewport.state;
 
-    const node = windowOf(container, 'horizontal');
-    expect(Number.parseFloat(node.style.left)).toBeCloseTo(((timeStart - domainStart) / span) * 100, 1);
-    expect(Number.parseFloat(node.style.width)).toBeCloseTo(((timeEnd - timeStart) / span) * 100, 1);
+    const window = windowOf(container, 'horizontal');
+    expect(window.start).toBeCloseTo(((timeStart - domainStart) / span) * 100, 1);
+    expect(window.end).toBeCloseTo(((timeEnd - domainStart) / span) * 100, 1);
   });
 
-  it('pans without zooming when the time window is dragged', () => {
+  it('follows the engine when the view moves by other means', () => {
+    const { tasks, groups } = fixtureData();
+    const { container, engine } = mount({ tasks, groups, showTimeZoomBar: true });
+
+    const [domainStart, domainEnd] = engine.getDomain();
+    const span = domainEnd - domainStart;
+    run(() => engine.viewport.setTimeRange(domainStart + span / 4, domainStart + span / 2));
+
+    // Nothing touched the slider: it is a view of the engine, so it moved anyway.
+    const window = windowOf(container, 'horizontal');
+    expect(window.start).toBeCloseTo(25, 1);
+    expect(window.end).toBeCloseTo(50, 1);
+  });
+
+  it('pans without zooming when the time window is moved', () => {
     const { tasks, groups } = fixtureData();
     const { container, engine } = mount({ tasks, groups, showTimeZoomBar: true });
 
@@ -943,14 +986,16 @@ describe('zoom bars', () => {
     const before = engine.viewport.state.timeStart;
     const span = engine.viewport.span;
 
-    // An eighth of the track, so an eighth of the domain.
-    drag(windowOf(container, 'horizontal'), { clientX: 0 }, { clientX: PLOT_WIDTH / 8 });
+    // An eighth of the axis, at an unchanged width: an eighth of the domain.
+    const window = windowOf(container, 'horizontal');
+    const width = window.end - window.start;
+    moveTo(container, 'horizontal', window.start + 12.5, window.start + 12.5 + width);
 
     expect(engine.viewport.state.timeStart - before).toBeCloseTo(domainSpan / 8, -3);
     expect(engine.viewport.span).toBeCloseTo(span, -3);
   });
 
-  it('zooms when a time handle is dragged', () => {
+  it('zooms when a time handle is moved', () => {
     const { tasks, groups } = fixtureData();
     const { container, engine } = mount({ tasks, groups, showTimeZoomBar: true });
 
@@ -958,14 +1003,15 @@ describe('zoom bars', () => {
     const start = engine.viewport.state.timeStart;
     const span = engine.viewport.span;
 
-    drag(handleOf(container, 'horizontal', 'end'), { clientX: 0 }, { clientX: PLOT_WIDTH / 8 });
+    const window = windowOf(container, 'horizontal');
+    moveTo(container, 'horizontal', window.start, window.end + 12.5);
 
     // The grabbed edge moved out, so the window is wider and its start is pinned.
     expect(engine.viewport.span).toBeGreaterThan(span);
     expect(engine.viewport.state.timeStart).toBeCloseTo(start, -3);
   });
 
-  it('scrolls when the row window is dragged', () => {
+  it('scrolls when the row window is moved', () => {
     const { tasks, groups } = fixtureData({ groups: 40, tasksPerGroup: 1 });
     const { container, engine } = mount({ tasks, groups, showRowZoomBar: true });
 
@@ -973,24 +1019,26 @@ describe('zoom bars', () => {
     expect(totalHeight).toBeGreaterThan(PLOT_HEIGHT);
     expect(engine.viewport.state.scrollTop).toBe(0);
 
-    drag(windowOf(container, 'vertical'), { clientY: 0 }, { clientY: PLOT_HEIGHT / 10 });
+    const window = windowOf(container, 'vertical');
+    const width = window.end - window.start;
+    moveTo(container, 'vertical', 10, 10 + width);
 
-    // A tenth of the track is a tenth of the content.
+    // A tenth down the axis is a tenth through the content, and an unchanged
+    // width asks for the row scale it already has.
     expect(engine.viewport.state.scrollTop).toBeCloseTo(totalHeight / 10, 0);
+    expect(engine.getOptions().metrics.laneHeight).toBe(26);
   });
 
-  it('scales row height when a row handle is dragged', () => {
+  it('scales row height so the window fills the plot', () => {
     const { tasks, groups } = fixtureData({ groups: 40, tasksPerGroup: 1 });
     const { container, engine } = mount({ tasks, groups, showRowZoomBar: true });
     expect(engine.getOptions().metrics.laneHeight).toBe(26);
 
-    // Pulling the bottom edge up asks for less content on screen, so rows grow.
-    drag(handleOf(container, 'vertical', 'end'), { clientY: PLOT_HEIGHT }, { clientY: PLOT_HEIGHT - 40 });
+    // A quarter of the rows asked to fill the plot, so rows grow to suit.
+    moveTo(container, 'vertical', 0, 25);
 
-    const grown = engine.getOptions().metrics.laneHeight;
-    expect(grown).toBeGreaterThan(26);
-    expect(grown).toBeLessThanOrEqual(120);
-    expect(engine.totalHeight).toBeGreaterThan(40 * 34);
+    expect(engine.getOptions().metrics.laneHeight).toBeGreaterThan(26);
+    expect(PLOT_HEIGHT / engine.totalHeight).toBeCloseTo(0.25, 2);
   });
 
   it('never drives lane height outside its bounds', () => {
@@ -998,11 +1046,11 @@ describe('zoom bars', () => {
     const { container, engine } = mount({ tasks, groups, showRowZoomBar: true });
 
     // Collapse the window as far as it will go: the clamp, not the maths, wins.
-    drag(handleOf(container, 'vertical', 'end'), { clientY: PLOT_HEIGHT }, { clientY: 0 });
+    moveTo(container, 'vertical', 0, 1);
     expect(engine.getOptions().metrics.laneHeight).toBeLessThanOrEqual(120);
 
     // And the other way, asking for far more content than exists.
-    drag(handleOf(container, 'vertical', 'end'), { clientY: 0 }, { clientY: PLOT_HEIGHT * 4 });
+    moveTo(container, 'vertical', 0, 100);
     expect(engine.getOptions().metrics.laneHeight).toBeGreaterThanOrEqual(6);
   });
 });

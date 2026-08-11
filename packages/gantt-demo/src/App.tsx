@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GanttHistory,
+  applyChanges,
   type GanttEngine,
   type GanttId,
   type GanttRow,
@@ -60,9 +61,69 @@ const MAX_LANES: { label: string; value: number }[] = [
   { label: "unlimited", value: 64 },
 ];
 
+/**
+ * How the y-axis list is structured and ordered.
+ *
+ * Only ever a different `groups` array — the tasks never move, so switching costs
+ * one pass over the dataset and nothing per frame. That is the whole contract:
+ * `groups` *is* the y axis.
+ */
+type RowMode = "projects" | "teams" | "start";
+
+const ROW_MODES: { value: RowMode; label: string; title: string }[] = [
+  {
+    value: "projects",
+    label: "Projects",
+    title: "One flat row per project, in the order the generator made them",
+  },
+  {
+    value: "teams",
+    label: "Teams → projects",
+    title: "The generator's own tree: two levels, so collapse and roll-up have something to do",
+  },
+  {
+    value: "start",
+    label: "By start date",
+    title: "Flat projects, earliest first — row order is the app's choice, not the engine's",
+  },
+];
+
+/**
+ * Which items are on the y axis.
+ *
+ * Unlike {@link RowMode} this cannot be done with `groups` alone: the engine
+ * synthesizes a row for any `task.groupId` it was not given, so dropping a group
+ * on its own brings it straight back as an unlabelled row at the end. Trimming
+ * the y axis means trimming the *tasks* as well, which is what `chartTasks`
+ * below does — and why "All" is the one setting that costs nothing.
+ *
+ * Applied after {@link RowMode} has ordered the list, so "First 10" of
+ * "By start date" is the ten earliest projects rather than the ten the generator
+ * happened to make first.
+ */
+type RowFilter = "all" | "first10" | "first50" | "earlyStart";
+
+/** Cut-off for the `earlyStart` filter, measured into the generated timeline. */
+const EARLY_START_DAYS = 30;
+
+const ROW_FILTERS: { value: RowFilter; label: string; title: string }[] = [
+  { value: "all", label: "All", title: "Every project in the dataset" },
+  { value: "first10", label: "First 10", title: "The first ten rows, as ordered above" },
+  { value: "first50", label: "First 50", title: "The first fifty rows, as ordered above" },
+  {
+    value: "earlyStart",
+    label: "Early starters",
+    title:
+      `Only projects beginning in the first ${EARLY_START_DAYS} days of the timeline` +
+      " — a filter the data decides rather than a count",
+  },
+];
+
 export function App(): JSX.Element {
   const [taskCount, setTaskCount] = useState(10_000);
   const [tasksPerRow, setTasksPerRow] = useState(100);
+  const [rowMode, setRowMode] = useState<RowMode>("projects");
+  const [rowFilter, setRowFilter] = useState<RowFilter>("all");
   const [maxLanes, setMaxLanes] = useState(64);
   const [dark, setDark] = useState(true);
   const [stacking, setStacking] = useState(true);
@@ -86,38 +147,110 @@ export function App(): JSX.Element {
   useEffect(() => setTasks(dataset.tasks), [dataset]);
 
   /**
-   * One flat row per distinct `task.groupId` — not the generator's group list,
-   * which still carries the unused team/project tree.
+   * The y-axis list: the rows {@link RowFilter} kept, structured and ordered by
+   * {@link RowMode}, plus the set of group ids that survived so the tasks can be
+   * trimmed to match.
    *
-   * The engine would synthesize exactly this list on its own if `groups` were
-   * omitted; it is spelled out here only so every {@link DISABLE_EVERY}th row
-   * can carry `disabled: true`. Such a row keeps its bars — faded, still
-   * exported, still hit by "Fit" and the zoom bars — but ignores every
-   * interaction with them: no hover, click, marquee, drag, or drop onto it.
+   * Two of the three modes are one flat row per distinct `task.groupId` — the
+   * list the engine would synthesize on its own if `groups` were omitted, spelled
+   * out here so that every {@link DISABLE_EVERY}th row can carry
+   * `disabled: true`. Such a row keeps its bars — faded, still exported, still hit
+   * by "Fit" and the zoom bars — but ignores every interaction with them: no
+   * hover, click, marquee, drag, or drop onto it.
    *
-   * The flag only *seeds* the state, and only for groups the engine has not
-   * seen before, so the gutter's power button and "Enable rows" below win from
-   * then on and survive an edit to the tasks.
+   * `disabled` only *seeds* the state, and only for groups the engine has not seen
+   * before, so the gutter's power button and "Enable rows" win from then on — and
+   * survive both an edit to the tasks and a switch of mode, since a group id keeps
+   * whatever the user last did to it.
    *
    * Built from `dataset.tasks` rather than `tasks`: rows come and go with the
    * dataset, not with an edit, and rebuilding this over 250 000 tasks on every
    * drag would be the most expensive thing in the app.
    */
-  const groups = useMemo<DemoGroup[]>(() => {
-    const seen = new Set<GanttId>();
-    const list: DemoGroup[] = [];
+  const axis = useMemo<{ groups: DemoGroup[]; kept: Set<GanttId> | null }>(() => {
+    // One pass for the project list, for the ordering, and for the earliest
+    // start each project has — which is both the sort key and the filter.
+    const order: GanttId[] = [];
+    const startOf = new Map<GanttId, number>();
+    let earliest = Infinity;
     for (const task of dataset.tasks) {
-      if (seen.has(task.groupId)) continue;
-      seen.add(task.groupId);
-      list.push({
-        id: task.groupId,
-        label: String(task.groupId),
-        disabled: list.length % DISABLE_EVERY === DISABLE_EVERY - 1,
-        data: { kind: "project" },
-      });
+      const known = startOf.get(task.groupId);
+      if (known === undefined) {
+        order.push(task.groupId);
+        startOf.set(task.groupId, task.start);
+      } else if (task.start < known) {
+        startOf.set(task.groupId, task.start);
+      }
+      if (task.start < earliest) earliest = task.start;
     }
-    return list;
-  }, [dataset]);
+
+    if (rowMode === "start") {
+      // Stable, so projects starting on the same day keep their generated order.
+      order.sort((a, b) => (startOf.get(a) as number) - (startOf.get(b) as number));
+    }
+
+    const cutoff = earliest + EARLY_START_DAYS * DAY;
+    const chosen =
+      rowFilter === "first10"
+        ? order.slice(0, 10)
+        : rowFilter === "first50"
+          ? order.slice(0, 50)
+          : rowFilter === "earlyStart"
+            ? order.filter((id) => (startOf.get(id) as number) < cutoff)
+            : order;
+
+    // Null means "all of them", which is what lets `chartTasks` do no work.
+    const kept = chosen.length === order.length ? null : new Set(chosen);
+
+    if (rowMode !== "teams") {
+      return {
+        kept,
+        groups: chosen.map<DemoGroup>((id, index) => ({
+          id,
+          label: String(id),
+          disabled: index % DISABLE_EVERY === DISABLE_EVERY - 1,
+          data: { kind: "project" },
+        })),
+      };
+    }
+
+    /*
+     * The generator's real tree, which the flat modes throw away: teams as roots,
+     * projects beneath them, and only the projects carrying tasks. A team whose
+     * every project the filter removed is dropped as well, rather than left as an
+     * empty row — the engine has no reason to guess that for us.
+     */
+    const projects = dataset.groups.filter(
+      (group) => group.data?.kind === "project" && (kept === null || kept.has(group.id)),
+    );
+    const parents = new Set(projects.map((group) => group.parentId as GanttId));
+
+    return {
+      kept,
+      groups: [
+        ...dataset.groups.filter((group) => group.data?.kind === "team" && parents.has(group.id)),
+        ...projects.map((group, index) => ({
+          ...group,
+          disabled: index % DISABLE_EVERY === DISABLE_EVERY - 1,
+        })),
+      ],
+    };
+  }, [dataset, rowMode, rowFilter]);
+
+  const groups = axis.groups;
+
+  /**
+   * The tasks the chart is actually given — those on a row the y axis kept.
+   *
+   * `axis.kept === null` short-circuits to the same array, which matters: this
+   * runs again on every committed drag, and an unconditional pass over 250 000
+   * tasks would be the most expensive thing in the app. A filtered y axis opts
+   * into that cost, and only while it is filtered.
+   */
+  const chartTasks = useMemo(() => {
+    const kept = axis.kept;
+    return kept === null ? tasks : tasks.filter((task) => kept.has(task.groupId));
+  }, [tasks, axis.kept]);
 
   /**
    * Frame roughly six weeks around today. The engine's own default is to fit the
@@ -136,24 +269,30 @@ export function App(): JSX.Element {
   const stats = useFrameStats(engine as GanttEngine<unknown, unknown> | null);
 
   /**
-   * How many rows are off right now: the seeded ones, plus every toggle from
-   * the gutter's power button or the right-click menu since.
+   * How long the y-axis list is, and how many of its rows are off right now: the
+   * seeded ones, plus every toggle from the gutter's power button or the
+   * right-click menu since.
    *
    * Counted from the rows rather than accumulated. `onRowDisabledChange` fires
    * once per row a *user* toggles — never for the seed, and not for
    * `enableAllRows` either, which clears the lot in one go — so a running total
    * would start wrong and drift.
+   *
+   * The total is not `groups.length`: with the nested y axis a collapsed team
+   * takes its projects out of the list, so only the layout knows how many rows
+   * there actually are. Hence the recount on every collapse as well.
    */
-  const [disabledRows, setDisabledRows] = useState(0);
-  const countDisabledRows = useCallback(() => {
+  const [rowCounts, setRowCounts] = useState({ total: 0, disabled: 0 });
+  const countRows = useCallback(() => {
     if (!engine) return;
-    let count = 0;
-    for (const row of engine.getLayout().rows) if (row.disabled) count++;
-    setDisabledRows(count);
+    const rows = engine.getLayout().rows;
+    let disabled = 0;
+    for (const row of rows) if (row.disabled) disabled++;
+    setRowCounts({ total: rows.length, disabled });
   }, [engine]);
   useEffect(() => {
-    countDisabledRows();
-  }, [countDisabledRows, groups]);
+    countRows();
+  }, [countRows, groups]);
 
   const options: DeepPartial<GanttEngineOptions> = useMemo(
     () => ({
@@ -314,9 +453,19 @@ export function App(): JSX.Element {
     setLastDrop(`${what} → ${event.group?.label ?? "—"} @ ${when}`);
   }, []);
 
+  /**
+   * Apply an edit to the whole dataset, not to the part of it on screen.
+   *
+   * The array the chart hands over is `chartTasks` with the changes applied — so
+   * when the y axis is filtered it holds only the rows that survived the filter,
+   * and storing it would delete every task the filter is hiding. The `changes` are
+   * the durable half of the payload, so all three of these replay them onto the
+   * full list instead. `applyChanges` returns the same array when nothing matches,
+   * so this is no more work than trusting the argument was.
+   */
   const applyAndRecord = useCallback(
-    (next: DemoTask[], changes: TaskChange[]) => {
-      setTasks(next);
+    (_next: DemoTask[], changes: TaskChange[]) => {
+      setTasks((current) => applyChanges(current, changes) as DemoTask[]);
       history.push(changes, "move");
       setHistoryDepth({ undo: history.depth, redo: 0 });
     },
@@ -325,17 +474,17 @@ export function App(): JSX.Element {
 
   const undo = useCallback(() => {
     const entry = history.undo();
-    if (!entry || !engine) return;
-    setTasks(engine.applyChanges(entry.changes) as DemoTask[]);
+    if (!entry) return;
+    setTasks((current) => applyChanges(current, entry.changes) as DemoTask[]);
     setHistoryDepth({ undo: history.depth, redo: 1 });
-  }, [engine, history]);
+  }, [history]);
 
   const redo = useCallback(() => {
     const entry = history.redo();
-    if (!entry || !engine) return;
-    setTasks(engine.applyChanges(entry.changes) as DemoTask[]);
+    if (!entry) return;
+    setTasks((current) => applyChanges(current, entry.changes) as DemoTask[]);
     setHistoryDepth({ undo: history.depth, redo: 0 });
-  }, [engine, history]);
+  }, [history]);
 
   /**
    * Pan from outside the chart.
@@ -427,6 +576,36 @@ export function App(): JSX.Element {
           </select>
         </label>
 
+        <label className="app__field" title="How the y-axis list is structured and ordered">
+          Y axis
+          <select
+            value={rowMode}
+            onChange={(event) => setRowMode(event.target.value as RowMode)}
+            title={ROW_MODES.find((mode) => mode.value === rowMode)?.title}
+          >
+            {ROW_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value} title={mode.title}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="app__field" title="Which items the y-axis list holds">
+          Rows
+          <select
+            value={rowFilter}
+            onChange={(event) => setRowFilter(event.target.value as RowFilter)}
+            title={ROW_FILTERS.find((filter) => filter.value === rowFilter)?.title}
+          >
+            {ROW_FILTERS.map((filter) => (
+              <option key={filter.value} value={filter.value} title={filter.title}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label
           className="app__field"
           title="Lane ceiling per row — extra tasks pack into the last lane"
@@ -496,19 +675,35 @@ export function App(): JSX.Element {
           >
             {rowsFitted ? "Reset Y" : "Fit Y"}
           </button>
-          <button type="button" onClick={() => engine?.collapseAll()}>
+          {/*
+            Both recount: a bulk collapse changes the length of the y-axis list,
+            and unlike a single toggle it emits no per-row event to follow.
+          */}
+          <button
+            type="button"
+            onClick={() => {
+              engine?.collapseAll();
+              countRows();
+            }}
+          >
             Collapse
           </button>
-          <button type="button" onClick={() => engine?.expandAll()}>
+          <button
+            type="button"
+            onClick={() => {
+              engine?.expandAll();
+              countRows();
+            }}
+          >
             Expand
           </button>
           <button
             type="button"
             onClick={() => {
               engine?.enableAllRows();
-              countDisabledRows();
+              countRows();
             }}
-            disabled={disabledRows === 0}
+            disabled={rowCounts.disabled === 0}
             title="Switch every disabled row back on"
           >
             Enable rows
@@ -538,7 +733,7 @@ export function App(): JSX.Element {
 
       <div className="app__chart">
         <GanttChart<DemoTaskData, DemoGroupData>
-          tasks={tasks}
+          tasks={chartTasks}
           groups={groups}
           options={options}
           theme={dark ? "dark" : "light"}
@@ -548,11 +743,12 @@ export function App(): JSX.Element {
           onTasksChange={applyAndRecord}
           onDragEnd={describeDrop}
           onSelectionChange={setSelection}
-          onRowDisabledChange={countDisabledRows}
+          onRowDisabledChange={countRows}
+          onRowToggle={countRows}
           rowMenuItems={rowMenuItems}
           engineRef={setEngine}
           exportRef={exporter}
-          headerCorner={<span>{groups.length.toLocaleString()} rows</span>}
+          headerCorner={<span>{rowCounts.total.toLocaleString()} rows</span>}
           showTimeZoomBar={true}
           showRowZoomBar={true}
           showScrollbar={false}
@@ -560,14 +756,22 @@ export function App(): JSX.Element {
       </div>
 
       <footer className="app__stats">
-        <Stat label="tasks" value={tasks.length.toLocaleString()} />
+        {/* On the chart, then in the dataset — the two differ once "Rows" filters. */}
+        <Stat
+          label="tasks"
+          value={
+            chartTasks.length === tasks.length
+              ? tasks.length.toLocaleString()
+              : `${chartTasks.length.toLocaleString()} / ${tasks.length.toLocaleString()}`
+          }
+        />
         <Stat label="generated" value={`${dataset.generatedIn.toFixed(0)} ms`} />
         <Stat label="fps" value={String(stats.fps)} />
         <Stat label="bars drawn" value={stats.visibleItems.toLocaleString()} />
         <Stat label="candidates" value={stats.candidates.toLocaleString()} />
         <Stat label="rows drawn" value={String(stats.rows)} />
         <Stat label="selected" value={selection.length.toLocaleString()} />
-        <Stat label="rows off" value={disabledRows.toLocaleString()} />
+        <Stat label="rows off" value={rowCounts.disabled.toLocaleString()} />
         {stats.truncated ? (
           <span className="app__warn">frame truncated by maxVisibleItems</span>
         ) : null}

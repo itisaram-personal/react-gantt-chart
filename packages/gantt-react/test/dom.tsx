@@ -50,8 +50,8 @@ export function installLayout(width = PLOT_WIDTH, height = PLOT_HEIGHT): void {
   }
 
   /*
-   * jsdom implements no pointer capture, and the zoom bars capture so a drag
-   * survives the pointer leaving the handle. No-ops are enough: the tests
+   * jsdom implements no pointer capture, and the plot and the scrollbar capture
+   * so a drag survives the pointer leaving them. No-ops are enough: the tests
    * dispatch every move at the element that took the capture anyway.
    */
   const element = HTMLElement.prototype as unknown as Record<string, unknown>;
@@ -245,26 +245,6 @@ export function dispatch(
   act(() => {
     target.dispatchEvent(event);
   });
-}
-
-/**
- * Press, move and release on one element — the gesture the zoom bars expect.
- *
- * `installLayout` reports every box as 800×400 at the origin, so a client
- * coordinate here is also an offset into the track.
- */
-export function drag(
-  target: EventTarget,
-  from: { clientX?: number; clientY?: number },
-  to: { clientX?: number; clientY?: number },
-): void {
-  const at = (point: { clientX?: number; clientY?: number }): MouseEventInit => ({
-    clientX: point.clientX ?? 0,
-    clientY: point.clientY ?? 0,
-  });
-  dispatch(target, 'pointerdown', at(from));
-  dispatch(target, 'pointermove', at(to));
-  dispatch(target, 'pointerup', at(to));
 }
 
 export function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): void {

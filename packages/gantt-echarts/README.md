@@ -12,8 +12,8 @@ One `custom` series with `coordinateSystem: 'none'`. The engine has already
 resolved every bar to plot pixels, so ECharts is asked for exactly what it is good
 at — batching, diffing and painting thousands of elements — and nothing else:
 
-- **no axis, no `dataZoom`**, therefore no second owner of pan/zoom to disagree
-  with the engine, and no feedback loop to debounce;
+- **no axis, no `dataZoom` on the plot**, therefore no second owner of pan/zoom to
+  disagree with the engine, and no feedback loop to debounce;
 - **the canvas is the plot area**, so a client coordinate becomes a plot
   coordinate with one bounding-box subtraction;
 - **input is handled on the container**, not through ECharts' event system,
@@ -97,6 +97,39 @@ of `(timeStart, timeEnd, width)` that walk the *calendar* rather than adding fix
 milliseconds — day boundaries stay at local midnight across a DST change, and
 month bands keep their real lengths. Both the canvas grid and the React header use
 them, which is why grid lines and labels cannot drift apart.
+
+## Zoom sliders
+
+`buildTimeZoomOption` and `buildRowZoomOption` return the option for a real
+ECharts `dataZoom` slider — one horizontal over the time domain, one vertical over
+the rows. Each is meant for its *own* chart, sized to the strip it sits in, not for
+the plot: the plot's series has no axis for a dataZoom to bind to, and a slider
+sharing the plot's canvas would lay ECharts' pointer handling over the plot's own
+drag, marquee and wheel gestures.
+
+The engine still owns the camera, so a slider is wired as a controller and a view
+of it. Both directions are pure functions here:
+
+| direction | time | rows |
+| --- | --- | --- |
+| engine → slider | `timeZoomWindow` | `rowZoomWindow` |
+| slider → engine | `timeZoomRange` | `rowZoomScrollTop`, `rowZoomLaneHeight` |
+
+Windows are percentages of the axis, which is what `dataZoom` speaks. `taskDensity`
+summarises task starts into buckets for the overview the time slider paints behind
+its window, in one O(n) pass.
+
+Two things worth knowing if you wire these up yourself. Write the engine's window
+back with `setOption` rather than `dispatchAction`, since the latter fires the
+`datazoom` event you are listening to and feeds its own output back in. And suspend
+that write-back while a slider is being dragged: it is the one moment the two can
+legitimately disagree — the engine has clamped, the pointer has not — and
+correcting it mid-gesture pulls the handle out from under the pointer.
+
+The row slider's axis is in *fractions* of the content, not pixels, because
+dragging its handles rescales the rows and so changes the content height; an axis
+in pixels would have to be rewritten mid-drag, and rewriting the option is also
+what moves the window. `@gantt-chart/react` does all of this in `GanttZoomBar`.
 
 ## PNG export
 

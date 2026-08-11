@@ -71,6 +71,34 @@ function hasBarAt(svg: string, rect: { x: number; y: number; width: number }): b
   return false;
 }
 
+/**
+ * Was the custom chevron painted at this rect?
+ *
+ * Read back the same way as {@link hasBarAt}, but matching the notch tip — the
+ * one vertex that proves the registered `buildPath` ran rather than a rect.
+ */
+function hasChevronAt(
+  svg: string,
+  rect: { x: number; y: number; width: number; height: number; notch: number },
+): boolean {
+  const near = (value: number, target: number): boolean => Math.abs(value - target) <= 0.06;
+  const pattern = /M(-?[\d.]+) (-?[\d.]+)L(-?[\d.]+) (-?[\d.]+)L(-?[\d.]+) (-?[\d.]+)/g;
+  for (let match = pattern.exec(svg); match !== null; match = pattern.exec(svg)) {
+    const [, x0, y0, x1, y1, x2, y2] = match.map(Number);
+    if (
+      near(x0, rect.x) &&
+      near(y0, rect.y) &&
+      near(x1, rect.x + rect.width - rect.notch) &&
+      near(y1, rect.y) &&
+      near(x2, rect.x + rect.width) &&
+      near(y2, rect.y + rect.height / 2)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** A square-cornered bar, so the SVG path is a plain move-and-line. */
 const plainBar = (context: { geometry: { x: number; y: number; width: number; height: number } }) => ({
   type: 'rect' as const,
@@ -236,6 +264,60 @@ describe('rendering through a real ECharts instance', () => {
     expect(engine.viewport.state.width).toBe(500);
     // Bars are re-laid out for the narrower plot: one day is now 50px.
     expect(engine.getTaskRect('g0-t0')?.width).toBeCloseTo(50, 6);
+  });
+
+  /**
+   * A shape registered with ECharts is usable straight from an item renderer.
+   *
+   * Worth pinning down, because the mechanism is entirely ECharts': the custom
+   * series special-cases `path`, `image`, `text` and `group`, and looks every
+   * other `type` up in the registry `registerShape` writes to — throwing if it is
+   * not there. So the only thing this package has to do is not stand in the way,
+   * which is what {@link GanttElement.type} being an open union is for.
+   */
+  it('draws a shape registered with registerShape', () => {
+    const notch = 5;
+    const Chevron = echarts.graphic.extendShape({
+      shape: { x: 0, y: 0, width: 0, height: 0 },
+      buildPath(path: echarts.graphic.Path['path'], shape: Record<string, number>) {
+        const { x, y, width, height } = shape;
+        path.moveTo(x, y);
+        path.lineTo(x + width - notch, y);
+        path.lineTo(x + width, y + height / 2);
+        path.lineTo(x + width - notch, y + height);
+        path.lineTo(x, y + height);
+        path.closePath();
+      },
+    });
+    echarts.graphic.registerShape('test-chevron', Chevron);
+
+    const { engine } = fixture({ groups: 1, tasksPerGroup: 1 });
+    const chart = ssrChart();
+    const adapter = new GanttEChartsAdapter(engine, {
+      theme: lightTheme,
+      now: () => null,
+      showGrid: false,
+      showRowBands: false,
+      itemRenderer: (context) => ({
+        type: 'test-chevron',
+        shape: { ...context.geometry },
+        style: { fill: '#00ff00' },
+        silent: true,
+      }),
+    });
+    adapter.attach(chart);
+    track(adapter, chart);
+
+    const svg = chart.renderToSVGString();
+    const rect = engine.getTaskRect('g0-t0');
+    if (!rect) throw new Error('no rect for the only task');
+
+    // The chevron's own outline: five points, the third of them the notch tip at
+    // the vertical middle of the bar — geometry no built-in element would produce.
+    expect(svg).toContain('#00ff00');
+    expect(
+      hasChevronAt(svg, { x: rect.x, y: rect.y, width: rect.width, height: rect.height, notch }),
+    ).toBe(true);
   });
 
   it('renders a large frame within the visible-item cap', () => {

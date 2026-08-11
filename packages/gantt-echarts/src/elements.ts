@@ -8,8 +8,56 @@
  * handed to ECharts.
  */
 export interface GanttElement {
-  type: 'group' | 'rect' | 'line' | 'polygon' | 'polyline' | 'circle' | 'text' | 'path' | 'image';
-  /** Geometry, per element type (`{x, y, width, height, r}` for a rect, …). */
+  /**
+   * A built-in zrender element, or the name of your own shape.
+   *
+   * ECharts special-cases `path`, `image`, `text` and `group`; every other name
+   * is looked up in the registry that `graphic.registerShape` writes to, and a
+   * name that is not there throws when the frame renders. So a custom shape needs
+   * registering once, before the first render:
+   *
+   * ```ts
+   * import { graphic } from 'echarts/core';
+   *
+   * const Chevron = graphic.extendShape({
+   *   shape: { x: 0, y: 0, width: 0, height: 0, notch: 6 },
+   *   buildPath(path, shape) {
+   *     const { x, y, width, height, notch } = shape;
+   *     path.moveTo(x, y);
+   *     path.lineTo(x + width - notch, y);
+   *     path.lineTo(x + width, y + height / 2);
+   *     path.lineTo(x + width - notch, y + height);
+   *     path.lineTo(x, y + height);
+   *     path.closePath();
+   *   },
+   * });
+   * graphic.registerShape('gantt-chevron', Chevron);
+   * ```
+   *
+   * An item renderer then returns `{ type: 'gantt-chevron', shape: {…} }`, and
+   * whatever `shape` holds is what `buildPath` is handed. Keep `silent: true` as
+   * the built-in elements do — the adapter hit-tests against the engine, not
+   * against the scene graph, so a shape that takes pointer events only gets in
+   * the way of drag, resize and marquee.
+   *
+   * The union is open on purpose, and lists the built-ins only so they autocomplete.
+   */
+  type:
+    | 'group'
+    | 'rect'
+    | 'line'
+    | 'polygon'
+    | 'polyline'
+    | 'circle'
+    | 'text'
+    | 'path'
+    | 'image'
+    // eslint-disable-next-line @typescript-eslint/ban-types
+    | (string & {});
+  /**
+   * Geometry, per element type (`{x, y, width, height, r}` for a rect, …), or
+   * whatever a registered shape's `buildPath` reads.
+   */
   shape?: Record<string, unknown>;
   style?: GanttElementStyle;
   children?: GanttElement[];

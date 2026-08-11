@@ -169,14 +169,16 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   showGrid?: boolean;
   showRowBands?: boolean;
   /**
-   * Horizontal zoom bar under the plot: an overview of the whole time domain
-   * with the visible window drawn on it. Drag the window to pan, its handles to
-   * zoom. Off by default — it adds a strip below the body.
+   * Horizontal zoom bar under the plot: an ECharts `dataZoom` slider over the
+   * whole time domain, with a task-density overview behind the window. Drag the
+   * window to pan, its handles to zoom. Off by default — it adds a strip below
+   * the body.
    */
   showTimeZoomBar?: boolean;
   /**
-   * Vertical zoom bar beside the plot. Drag the window to scroll, its handles to
-   * scale row height so the selected rows fill the plot. Off by default.
+   * Vertical `dataZoom` slider beside the plot. Drag the window to scroll, its
+   * handles to scale row height so the selected rows fill the plot. Off by
+   * default.
    */
   showRowZoomBar?: boolean;
   /**
@@ -445,7 +447,9 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
           )}
         </div>
 
-        {showRowZoomBar ? <GanttRowZoomBar engine={engine} theme={theme} /> : null}
+        {showRowZoomBar ? (
+          <GanttRowZoomBar engine={engine} theme={theme} renderer={renderer} />
+        ) : null}
         {showScrollbar ? <GanttScrollbar engine={engine} theme={theme} /> : null}
       </div>
 
@@ -463,7 +467,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             overview rather than a second time axis to keep in register.
           */}
           <div className="gantt__zoom-scale">
-            <GanttTimeZoomBar engine={engine} theme={theme} />
+            <GanttTimeZoomBar engine={engine} theme={theme} renderer={renderer} />
           </div>
         </div>
       ) : null}

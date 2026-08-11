@@ -71,11 +71,15 @@ Each stage is memoized on its inputs, so:
 
 Two decisions shape the whole design:
 
-**The engine owns the viewport.** There is no ECharts axis or `dataZoom`
-component, and the custom series uses `coordinateSystem: 'none'` — every bar
-arrives already resolved to plot pixels. One owner for pan/zoom means no feedback
-loop between the chart library and the engine, and the canvas *is* the plot area,
-so a client coordinate becomes a plot coordinate with one subtraction.
+**The engine owns the viewport.** The plot has no ECharts axis and no `dataZoom`,
+and its custom series uses `coordinateSystem: 'none'` — every bar arrives already
+resolved to plot pixels. One owner for pan/zoom means no feedback loop between the
+chart library and the engine, and the canvas *is* the plot area, so a client
+coordinate becomes a plot coordinate with one subtraction. The optional zoom bars
+*are* ECharts `dataZoom` sliders, but each on its own slider-only chart beside the
+plot, and each a controller and a view of the viewport rather than a second copy
+of it: a slider dispatches its window into `viewport.setTimeRange` / `scrollTo`,
+and whatever the engine settles on is written back to the slider.
 
 **Chrome is DOM, bars are canvas.** The row gutter, the two-tier time header, the
 tooltip and the context menu are ordinary elements driven by the same store, so a

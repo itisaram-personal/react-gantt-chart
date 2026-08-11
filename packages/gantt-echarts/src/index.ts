@@ -3,8 +3,12 @@
  *
  * The chart is a single `custom` series with `coordinateSystem: 'none'`: the
  * engine resolves every bar to plot pixels, and ECharts is used for what it is
- * good at — batching, diffing and painting thousands of elements. There is no
- * axis or dataZoom component, so pan/zoom has exactly one owner (the engine).
+ * good at — batching, diffing and painting thousands of elements. The plot has no
+ * axis and no dataZoom, so pan/zoom has exactly one owner: the engine.
+ *
+ * The zoom bars *are* ECharts `dataZoom` sliders, but each on its own slider-only
+ * chart, and each a controller and a view of the engine's viewport rather than a
+ * second copy of it — see `zoomOption`.
  */
 
 export { GanttEChartsAdapter } from './adapter';
@@ -15,6 +19,30 @@ export type { CreateGanttChartInput, EChartsModuleLike } from './create';
 
 export { buildGanttOption } from './option';
 export type { GanttOption, GanttOptionInput, GanttCustomSeries } from './option';
+
+export {
+  ZOOM_DENSITY_BUCKETS,
+  buildRowZoomOption,
+  buildTimeZoomOption,
+  densitySeriesData,
+  rowZoomLaneHeight,
+  rowZoomScrollTop,
+  rowZoomWindow,
+  taskDensity,
+  timeZoomRange,
+  timeZoomWindow,
+} from './zoomOption';
+export type {
+  GanttZoomAxis,
+  GanttZoomOption,
+  GanttZoomSeries,
+  GanttZoomSlider,
+  GanttZoomWindow,
+  RowZoomLaneHeightInput,
+  RowZoomOptionInput,
+  RowZoomState,
+  TimeZoomOptionInput,
+} from './zoomOption';
 
 export {
   downloadGanttPng,
