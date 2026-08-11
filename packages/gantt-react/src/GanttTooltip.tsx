@@ -34,6 +34,15 @@ export interface GanttTooltipProps<T, G> {
    * back to `pointer-events: none` and closes the instant the bar is left.
    */
   interactive?: boolean;
+  /**
+   * How long the pointer has to rest on a bar before its tooltip opens, ms.
+   * Defaults to 1000; `0` opens on contact.
+   *
+   * The dwell is per bar and starts over on each one, so sweeping the pointer
+   * across a row raises nothing. Moving to a second bar takes the first one's
+   * tooltip down at once rather than leaving it up during the new wait.
+   */
+  openDelay?: number;
   /** Grace period before an unhovered tooltip closes, ms. */
   closeDelay?: number;
 }
@@ -58,6 +67,7 @@ export function GanttTooltip<T, G>({
   render,
   offset = 12,
   interactive = true,
+  openDelay = 1000,
   closeDelay = 160,
 }: GanttTooltipProps<T, G>): JSX.Element | null {
   const { hoveredTaskId, hoveredRowIndex, dragging } = useEngineState(
@@ -80,6 +90,7 @@ export function GanttTooltip<T, G>({
   const [held, setHeld] = useState<HeldHover | null>(null);
   const inside = useRef(false);
   const closeTimer = useRef<number | null>(null);
+  const openTimer = useRef<number | null>(null);
   // Read from the pointer handlers below, which outlive the render that made them.
   const heldRef = useRef<HeldHover | null>(null);
   heldRef.current = held;
@@ -88,6 +99,12 @@ export function GanttTooltip<T, G>({
     if (closeTimer.current === null) return;
     clearTimeout(closeTimer.current);
     closeTimer.current = null;
+  }, []);
+
+  const cancelOpen = useCallback(() => {
+    if (openTimer.current === null) return;
+    clearTimeout(openTimer.current);
+    openTimer.current = null;
   }, []);
 
   const closeSoon = useCallback(() => {
@@ -101,28 +118,61 @@ export function GanttTooltip<T, G>({
 
   useEffect(() => {
     if (dragging) {
+      cancelOpen();
       cancelClose();
       inside.current = false;
       setHeld(null);
       return;
     }
+
     if (hoveredTaskId !== null) {
       cancelClose();
-      setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+
+      // Already the one on screen, so there is nothing to wait for. This is also
+      // the pointer stepping into an interactive tooltip, which re-asserts its
+      // own bar's hover on the way in — that must not restart the dwell.
+      if (heldRef.current !== null && heldRef.current.taskId === hoveredTaskId) {
+        cancelOpen();
+        if (heldRef.current.rowIndex !== hoveredRowIndex) {
+          setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+        }
+        return;
+      }
+
+      if (openDelay <= 0) {
+        cancelOpen();
+        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+        return;
+      }
+
+      // A different bar: whatever is up goes now rather than lingering over the
+      // wrong task, and this one has to be dwelled on before it appears. The
+      // effect only re-runs when the hover actually changes, so a pointer moving
+      // *within* a bar lets the dwell run down instead of restarting it.
+      if (heldRef.current !== null) setHeld(null);
+      cancelOpen();
+      openTimer.current = window.setTimeout(() => {
+        openTimer.current = null;
+        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+      }, openDelay);
       return;
     }
-    // The hover is gone. Without pointer events there is nowhere for it to have
-    // gone *to*, so the tooltip goes with it.
+
+    // The hover is gone, so nothing is going to open.
+    cancelOpen();
+    // Without pointer events there is nowhere for it to have gone *to*, so the
+    // tooltip goes with it.
     if (!interactive) {
       cancelClose();
       setHeld(null);
       return;
     }
     if (!inside.current) closeSoon();
-  }, [hoveredTaskId, hoveredRowIndex, dragging, interactive, cancelClose, closeSoon]);
+  }, [hoveredTaskId, hoveredRowIndex, dragging, interactive, openDelay, cancelOpen, cancelClose, closeSoon]);
 
-  // Cancel a pending close on unmount, not on every dependency change.
+  // Cancel pending timers on unmount, not on every dependency change.
   useEffect(() => cancelClose, [cancelClose]);
+  useEffect(() => cancelOpen, [cancelOpen]);
 
   /**
    * Own size, measured rather than guessed — the content is the caller's, so

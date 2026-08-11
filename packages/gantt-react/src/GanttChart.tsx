@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
 import {
   applyChanges,
+  defaultOptions,
   type AxisRowDescriptor,
   type ContextMenuState,
   type DeepPartial,
@@ -13,6 +14,7 @@ import {
   type GanttPlugin,
   type GanttRow,
   type GanttTask,
+  type InteractionOptions,
   type Point,
   type TaskChange,
   type ViewportState,
@@ -95,6 +97,37 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   height?: number | string;
 
   /**
+   * Master switch for selecting bars. On by default.
+   *
+   * `false` closes every route into a selection: clicking a bar, ctrl/shift
+   * clicking, the rubber band, ctrl+A, the arrow keys and the menu items that
+   * select. Bars still hover, click (`onTaskClick` keeps firing), drag and
+   * resize — they just never light up. Switching it off also clears whatever
+   * was selected, since no gesture would be left to clear it.
+   *
+   * `engine.selection.set(...)` still works: an API call is the app's own
+   * decision, not user input to be filtered.
+   */
+  enableSelection?: boolean;
+  /**
+   * Select by dragging a box over the plot. Off by default.
+   *
+   * Turns the left-drag into a rubber band that selects every bar it covers,
+   * started from anywhere — empty background *or* a bar. Dragging a bar to move
+   * or resize it is turned off in exchange, since one gesture cannot do both; a
+   * click on a bar still selects it and fires `onTaskClick`.
+   *
+   * Modifiers work as they do for the background marquee: ctrl/meta adds to the
+   * selection, alt removes from it. Ignored when `enableSelection` is `false`.
+   *
+   * This is the master switch for the band, so `false` is not merely "the plain
+   * drag pans": no modifier draws a box either, where ctrl and shift otherwise
+   * would. Leave it unset to keep whatever `options.interaction` says — which,
+   * left alone, is the library default of ctrl/shift rubber-banding.
+   */
+  enableMarqueeSelection?: boolean;
+
+  /**
    * Accept edits. When provided the component is *controlled*: it never mutates
    * the data itself, and the caller is expected to render the returned array.
    * Without it, edits are applied to the engine's own copy.
@@ -154,6 +187,16 @@ export interface GanttChartProps<T = unknown, G = unknown> {
    * stands between the pointer and a bar.
    */
   tooltipInteractive?: boolean;
+  /**
+   * How long the pointer has to rest on a bar before its tooltip opens, ms.
+   * Defaults to 1000; `0` opens on contact.
+   *
+   * The dwell is per bar and starts over on each one, so sweeping the pointer
+   * across a row raises nothing. Moving to a second bar takes the first one's
+   * tooltip down at once rather than leaving it up during the new wait, and
+   * leaving the bar before the delay is up opens nothing at all.
+   */
+  tooltipOpenDelay?: number;
 
   showHeader?: boolean;
   showRowGutter?: boolean;
@@ -254,9 +297,20 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     renderer,
     tooltip,
     tooltipInteractive = true,
+    tooltipOpenDelay = 1000,
+    enableSelection,
+    enableMarqueeSelection,
   } = props;
 
   const theme = useMemo(() => resolveTheme(themeInput), [themeInput]);
+
+  // The two selection props are sugar over `options.interaction`, and win over
+  // it — they are the more specific statement. Left undefined they add nothing,
+  // so `options` alone still configures a chart the way it always did.
+  const engineOptions = useMemo(
+    () => withSelectionProps(options, enableSelection, enableMarqueeSelection),
+    [options, enableSelection, enableMarqueeSelection],
+  );
 
   // Dependencies are drawn by a plugin, created once and updated in place.
   const dependencyPlugin = useMemo(
@@ -273,7 +327,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     return list;
   }, [dependencyPlugin, props.plugins]);
 
-  const engine = useGanttEngine<T, G>({ tasks, groups, options, plugins });
+  const engine = useGanttEngine<T, G>({ tasks, groups, options: engineOptions, plugins });
 
   useEffect(() => {
     dependencyPlugin?.setTheme(theme);
@@ -443,6 +497,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
               locale={locale}
               render={tooltip ?? undefined}
               interactive={tooltipInteractive}
+              openDelay={tooltipOpenDelay}
             />
           )}
         </div>
@@ -480,6 +535,77 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
       />
     </div>
   );
+}
+
+/**
+ * Fold the two selection props into the engine options they stand for.
+ *
+ * Both are sugar: `enableSelection` is `interaction.selection`, and
+ * `enableMarqueeSelection` is the handful of settings that together make the
+ * drag a rubber band — the band itself, its reach over bars, a plain background
+ * drag that draws one, and the drag-to-move gesture it displaces.
+ *
+ * Undefined props change nothing, so a chart configured through `options` alone
+ * is untouched. A prop that *is* set wins over `options`, being the more
+ * specific statement of the same thing.
+ */
+function withSelectionProps(
+  options: DeepPartial<GanttEngineOptions> | undefined,
+  enableSelection: boolean | undefined,
+  enableMarqueeSelection: boolean | undefined,
+): DeepPartial<GanttEngineOptions> | undefined {
+  if (enableSelection === undefined && enableMarqueeSelection === undefined) return options;
+
+  const given = options?.interaction;
+  const fallback = defaultOptions.interaction;
+  const interaction: DeepPartial<InteractionOptions> = {};
+
+  // "No selection in any way" outranks a request for the rubber band: a band
+  // that could select nothing is worse than no band, so the drag stays a pan
+  // and the bar-moving gesture is left alone.
+  const marqueeSelects = enableSelection !== false && enableMarqueeSelection === true;
+
+  if (enableSelection !== undefined) interaction.selection = enableSelection;
+
+  if (enableMarqueeSelection !== undefined) {
+    // Both states are spelled out rather than left to the merge: `setOptions`
+    // layers over what the engine already holds, so switching the prop off has
+    // to hand back what switching it on took away — the caller's own `options`
+    // if they said, and the library default if they did not.
+    interaction.marqueeOnTasks = marqueeSelects;
+    // One gesture cannot both draw the band and carry the bar.
+    interaction.drag = marqueeSelects ? false : (given?.drag ?? fallback.drag);
+    interaction.resize = marqueeSelects ? false : (given?.resize ?? fallback.resize);
+  }
+
+  if (enableSelection === false) {
+    interaction.marquee = false;
+    interaction.marqueeOnTasks = false;
+  } else if (enableMarqueeSelection !== undefined) {
+    // The prop is the master switch for the band, not merely a mapping for the
+    // plain drag: `false` means no box from any modifier, so ctrl and shift
+    // drags pan rather than rubber-band.
+    interaction.marquee = marqueeSelects;
+  }
+
+  const backgroundDrag =
+    enableMarqueeSelection === undefined
+      ? given?.backgroundDrag
+      : {
+          ...given?.backgroundDrag,
+          plain: marqueeSelects
+            ? ("marquee" as const)
+            : (given?.backgroundDrag?.plain ?? fallback.backgroundDrag.plain),
+        };
+
+  return {
+    ...options,
+    interaction: {
+      ...given,
+      ...interaction,
+      ...(backgroundDrag ? { backgroundDrag } : null),
+    },
+  };
 }
 
 /**

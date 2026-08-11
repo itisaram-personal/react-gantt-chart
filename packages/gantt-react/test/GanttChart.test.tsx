@@ -572,7 +572,9 @@ describe('plot interaction', () => {
 
   it('shows a tooltip for the hovered task', () => {
     const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
-    const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+    // Content and placement are what these cover, so they open on contact; the
+    // dwell before that has its own block below.
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
     expect(container.querySelector('.gantt-tooltip')).toBeNull();
 
     const rect = engine.getTaskRect('g0-t0')!;
@@ -593,6 +595,7 @@ describe('plot interaction', () => {
       tasks,
       groups,
       tooltip: ({ task }) => `custom: ${String(task.id)}`,
+      tooltipOpenDelay: 0,
     });
 
     const rect = engine.getTaskRect('g0-t0')!;
@@ -604,7 +607,7 @@ describe('plot interaction', () => {
     const { tasks, groups } = fixtureData({ groups: 3, tasksPerGroup: 4 });
     const restore = stubBox(200, 200);
     try {
-      const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
       // Last row, last column: no room on the right of the bar, and none below.
       const rect = engine.getTaskRect('g2-t3')!;
       dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
@@ -626,7 +629,7 @@ describe('plot interaction', () => {
 
   it('holds the tooltip open while the pointer is inside it', async () => {
     const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
-    const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+    const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
 
     const rect = engine.getTaskRect('g0-t0')!;
     dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
@@ -656,6 +659,7 @@ describe('plot interaction', () => {
       groups,
       locale: 'en-US',
       tooltipInteractive: false,
+      tooltipOpenDelay: 0,
     });
 
     const rect = engine.getTaskRect('g0-t0')!;
@@ -668,7 +672,7 @@ describe('plot interaction', () => {
 
   it('passes the wheel through to the plot underneath', () => {
     const { tasks, groups } = fixtureData({ groups: 40, tasksPerGroup: 1 });
-    const { container, engine } = mount({ tasks, groups });
+    const { container, engine } = mount({ tasks, groups, tooltipOpenDelay: 0 });
 
     const rect = engine.getTaskRect('g0-t0')!;
     dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
@@ -687,6 +691,90 @@ describe('plot interaction', () => {
     }
   });
 
+  /**
+   * The dwell before a tooltip opens. Short delays throughout — the point is
+   * the before/after, and a real 1s wait per case would dominate the suite.
+   */
+  describe('open delay', () => {
+    const hover = (container: HTMLElement, rect: { x: number; y: number }): void => {
+      dispatch(plotOf(container), 'pointermove', { clientX: rect.x + 2, clientY: rect.y + 2 });
+    };
+
+    it('waits for the pointer to rest on the bar', async () => {
+      const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 120 });
+
+      hover(container, engine.getTaskRect('g0-t0')!);
+      expect(container.querySelector('.gantt-tooltip')).toBeNull();
+
+      await wait(40);
+      expect(container.querySelector('.gantt-tooltip')).toBeNull();
+
+      await wait(140);
+      expect(container.querySelector('.gantt-tooltip')?.textContent).toContain('Task 0.0');
+    });
+
+    it('makes the pointer stay a second by default', async () => {
+      const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US' });
+
+      hover(container, engine.getTaskRect('g0-t0')!);
+      // Well past the old open-on-contact behaviour, nowhere near a second.
+      await wait(300);
+      expect(container.querySelector('.gantt-tooltip')).toBeNull();
+    });
+
+    it('opens nothing when the bar is left before the delay is up', async () => {
+      const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 120 });
+
+      hover(container, engine.getTaskRect('g0-t0')!);
+      await wait(40);
+      // Off the bar and onto empty plot: the pending tooltip is dropped, not
+      // merely postponed.
+      dispatch(plotOf(container), 'pointermove', { clientX: PLOT_WIDTH - 2, clientY: PLOT_HEIGHT - 2 });
+
+      await wait(200);
+      expect(container.querySelector('.gantt-tooltip')).toBeNull();
+    });
+
+    it('starts the dwell over on the next bar, taking the first one down', async () => {
+      const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 120 });
+
+      hover(container, engine.getTaskRect('g0-t0')!);
+      await wait(160);
+      expect(container.querySelector('.gantt-tooltip')?.textContent).toContain('Task 0.0');
+
+      // Moving on drops the first tooltip at once rather than leaving it up
+      // over the wrong bar while the second one is waited out.
+      hover(container, engine.getTaskRect('g0-t1')!);
+      expect(container.querySelector('.gantt-tooltip')).toBeNull();
+
+      await wait(160);
+      expect(container.querySelector('.gantt-tooltip')?.textContent).toContain('Task 0.1');
+    });
+
+    it('does not restart the dwell as the pointer moves within one bar', async () => {
+      const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 120 });
+
+      const rect = engine.getTaskRect('g0-t0')!;
+      const plot = plotOf(container);
+      // Four moves across the same bar, spread over most of the delay.
+      for (let i = 0; i < 4; i++) {
+        dispatch(plot, 'pointermove', {
+          clientX: rect.x + 2 + i * 2,
+          clientY: rect.y + rect.height / 2,
+        });
+        await wait(25);
+      }
+
+      await wait(60);
+      expect(container.querySelector('.gantt-tooltip')?.textContent).toContain('Task 0.0');
+    });
+  });
+
   it('routes keyboard shortcuts to the engine', () => {
     const { tasks, groups } = fixtureData({ groups: 2, tasksPerGroup: 2 });
     const { container, engine } = mount({ tasks, groups });
@@ -696,6 +784,247 @@ describe('plot interaction', () => {
 
     key(plotOf(container), 'Escape');
     expect(engine.selection.selected.size).toBe(0);
+  });
+});
+
+/**
+ * `enableSelection` and `enableMarqueeSelection`.
+ *
+ * Geometry note: the fixture lays each group's tasks out side by side in one
+ * row, so a box drawn from one bar across to the next covers both — and has to
+ * be given some height, or it is too small to count as a drag at all.
+ */
+describe('selection props', () => {
+  const two = () => fixtureData({ groups: 1, tasksPerGroup: 2 });
+
+  /** Press, travel, release — in plot pixels. */
+  function dragBetween(plot: HTMLElement, from: { x: number; y: number }, to: { x: number; y: number }): void {
+    dispatch(plot, 'pointerdown', { clientX: from.x, clientY: from.y });
+    dispatch(plot, 'pointermove', { clientX: to.x, clientY: to.y });
+    dispatch(plot, 'pointerup', { clientX: to.x, clientY: to.y });
+  }
+
+  it('selects nothing at all when selection is off', () => {
+    const { tasks, groups } = two();
+    const onSelectionChange = vi.fn();
+    const onTaskClick = vi.fn();
+    const { container, engine } = mount({
+      tasks,
+      groups,
+      enableSelection: false,
+      onSelectionChange,
+      onTaskClick,
+    });
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    const point = { clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 };
+    const plot = plotOf(container);
+
+    dispatch(plot, 'pointerdown', point);
+    dispatch(plot, 'pointerup', point);
+    // Ctrl-click, shift-click, ctrl+A and the arrow keys are all shut too.
+    dispatch(plot, 'pointerdown', { ...point, ctrlKey: true });
+    dispatch(plot, 'pointerup', { ...point, ctrlKey: true });
+    key(plot, 'a', { ctrlKey: true });
+    key(plot, 'ArrowDown');
+
+    expect(engine.selection.selected.size).toBe(0);
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    // The bar is still a click target — it just never lights up.
+    expect(onTaskClick).toHaveBeenCalled();
+  });
+
+  it('refuses the rubber band when selection is off', () => {
+    const { tasks, groups } = two();
+    const { container, engine } = mount({ tasks, groups, enableSelection: false });
+
+    const a = engine.getTaskRect('g0-t0')!;
+    const b = engine.getTaskRect('g0-t1')!;
+    // Shift is a marquee in the defaults; with selection off it falls back to a pan.
+    dispatch(container.querySelector('.gantt-plot')!, 'pointerdown', {
+      clientX: a.x,
+      clientY: a.y - 2,
+      shiftKey: true,
+    });
+    dispatch(plotOf(container), 'pointermove', { clientX: b.x + b.width, clientY: b.y + b.height, shiftKey: true });
+    dispatch(plotOf(container), 'pointerup', { clientX: b.x + b.width, clientY: b.y + b.height, shiftKey: true });
+
+    expect(engine.selection.selected.size).toBe(0);
+    expect(engine.store.getState().marquee).toBeNull();
+  });
+
+  it('drops the menu items that select when selection is off', () => {
+    const { tasks, groups } = two();
+    const { container } = mount({ tasks, groups, enableSelection: false });
+
+    dispatch(plotOf(container), 'contextmenu', { clientX: 10, clientY: 10, button: 2 });
+    const labels = Array.from(
+      container.ownerDocument.querySelectorAll('.gantt-menu__item'),
+    ).map((node) => node.textContent);
+
+    expect(labels).not.toContain('Select all');
+    expect(labels).not.toContain('Clear selection');
+    // The rest of the menu is untouched.
+    expect(labels).toContain('Fit to timeline');
+  });
+
+  it('clears what was selected when selection is switched off', () => {
+    const { tasks, groups } = two();
+    const harness = mount({ tasks, groups });
+
+    run(() => harness.engine.selection.set(['g0-t0']));
+    expect(harness.engine.selection.selected.size).toBe(1);
+
+    harness.rerender({ enableSelection: false });
+    expect(harness.engine.selection.selected.size).toBe(0);
+  });
+
+  it('box-selects from the background when marquee selection is on', () => {
+    const { tasks, groups } = two();
+    const onSelectionChange = vi.fn();
+    const { container, engine } = mount({
+      tasks,
+      groups,
+      enableMarqueeSelection: true,
+      onSelectionChange,
+    });
+
+    const a = engine.getTaskRect('g0-t0')!;
+    const b = engine.getTaskRect('g0-t1')!;
+    // A plain drag now draws the band — no modifier needed.
+    dragBetween(
+      plotOf(container),
+      { x: a.x - 4, y: a.y - 4 },
+      { x: b.x + b.width + 4, y: b.y + b.height + 4 },
+    );
+
+    expect(Array.from(engine.selection.selected).sort()).toEqual(['g0-t0', 'g0-t1']);
+    expect(onSelectionChange).toHaveBeenCalled();
+    expect(engine.store.getState().marquee).toBeNull();
+  });
+
+  it('box-selects from a bar instead of moving it', () => {
+    const { tasks, groups } = two();
+    const onChanges = vi.fn();
+    const { container, engine } = mount({ tasks, groups, enableMarqueeSelection: true, onChanges });
+
+    const a = engine.getTaskRect('g0-t0')!;
+    const b = engine.getTaskRect('g0-t1')!;
+    // The press lands on the first bar and travels across to the second.
+    dragBetween(
+      plotOf(container),
+      { x: a.x + a.width / 2, y: a.y + 1 },
+      { x: b.x + b.width / 2, y: b.y + b.height },
+    );
+
+    expect(Array.from(engine.selection.selected).sort()).toEqual(['g0-t0', 'g0-t1']);
+    // The bar stayed where it was: the gesture was a band, not a move.
+    expect(engine.getTask('g0-t0')?.start).toBe(T0);
+    expect(onChanges).not.toHaveBeenCalled();
+  });
+
+  it('still selects a bar on a click when marquee selection is on', () => {
+    const { tasks, groups } = two();
+    const onTaskClick = vi.fn();
+    const { container, engine } = mount({ tasks, groups, enableMarqueeSelection: true, onTaskClick });
+
+    const rect = engine.getTaskRect('g0-t1')!;
+    const point = { clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 };
+    dispatch(plotOf(container), 'pointerdown', point);
+    dispatch(plotOf(container), 'pointerup', point);
+
+    expect(Array.from(engine.selection.selected)).toEqual(['g0-t1']);
+    expect(onTaskClick.mock.calls[0][0].id).toBe('g0-t1');
+  });
+
+  it('turns off dragging and resizing in exchange', () => {
+    const { tasks, groups } = two();
+    const { engine } = mount({ tasks, groups, enableMarqueeSelection: true });
+
+    const interaction = engine.getOptions().interaction;
+    expect(interaction.drag).toBe(false);
+    expect(interaction.resize).toBe(false);
+    expect(interaction.marqueeOnTasks).toBe(true);
+    expect(interaction.backgroundDrag.plain).toBe('marquee');
+
+    const rect = engine.getTaskRect('g0-t0')!;
+    expect(engine.drag.begin('g0-t0', { x: rect.x + 4, y: rect.y + 4 })).toBe(false);
+  });
+
+  it('draws no box on a modifier drag when marquee selection is off', () => {
+    const { tasks, groups } = two();
+    const { container, engine } = mount({ tasks, groups, enableMarqueeSelection: false });
+
+    // ctrl and shift are the library's default marquee modifiers; the prop is
+    // the master switch, so off has to mean off for those too.
+    expect(engine.getOptions().interaction.marquee).toBe(false);
+
+    const a = engine.getTaskRect('g0-t0')!;
+    const b = engine.getTaskRect('g0-t1')!;
+    for (const modifier of [{ ctrlKey: true }, { shiftKey: true }]) {
+      const plot = plotOf(container);
+      dispatch(plot, 'pointerdown', { clientX: a.x - 4, clientY: a.y - 4, ...modifier });
+      dispatch(plot, 'pointermove', { clientX: b.x + b.width, clientY: b.y + b.height, ...modifier });
+      // Mid-gesture: a band would be on the store by now.
+      expect(engine.store.getState().marquee).toBeNull();
+      dispatch(plot, 'pointerup', { clientX: b.x + b.width, clientY: b.y + b.height, ...modifier });
+      expect(engine.selection.selected.size).toBe(0);
+    }
+  });
+
+  it('leaves the default modifier marquee alone when the prop is unset', () => {
+    const { tasks, groups } = two();
+    const { engine } = mount({ tasks, groups, enableSelection: true });
+
+    // Only an explicit `false` claims the band; unset defers to `options`.
+    expect(engine.getOptions().interaction.marquee).toBe(true);
+    expect(engine.getOptions().interaction.backgroundDrag.ctrl).toBe('marquee');
+  });
+
+  it('gives dragging back when marquee selection is turned off again', () => {
+    const { tasks, groups } = two();
+    const harness = mount({ tasks, groups, enableMarqueeSelection: true });
+    expect(harness.engine.getOptions().interaction.drag).toBe(false);
+
+    harness.rerender({ enableMarqueeSelection: false });
+    const interaction = harness.engine.getOptions().interaction;
+    expect(interaction.marqueeOnTasks).toBe(false);
+    expect(interaction.marquee).toBe(false);
+    expect(interaction.backgroundDrag.plain).toBe('pan');
+    expect(interaction.drag).toBe(true);
+    expect(interaction.resize).toBe(true);
+  });
+
+  it('lets selection off outrank marquee selection', () => {
+    const { tasks, groups } = two();
+    const { container, engine } = mount({
+      tasks,
+      groups,
+      enableSelection: false,
+      enableMarqueeSelection: true,
+    });
+
+    const interaction = engine.getOptions().interaction;
+    expect(interaction.marquee).toBe(false);
+    expect(interaction.marqueeOnTasks).toBe(false);
+    // And dragging a bar is left alone rather than traded for a band that
+    // could select nothing.
+    expect(interaction.drag).toBe(true);
+
+    const a = engine.getTaskRect('g0-t0')!;
+    const b = engine.getTaskRect('g0-t1')!;
+    dragBetween(plotOf(container), { x: a.x - 4, y: a.y - 4 }, { x: b.x + b.width, y: b.y + b.height });
+    expect(engine.selection.selected.size).toBe(0);
+  });
+
+  it('leaves a chart configured through options alone', () => {
+    const { tasks, groups } = two();
+    const { engine } = mount({ tasks, groups, options: { interaction: { selection: false, drag: false } } });
+
+    const interaction = engine.getOptions().interaction;
+    expect(interaction.selection).toBe(false);
+    expect(interaction.drag).toBe(false);
+    expect(interaction.marqueeOnTasks).toBe(false);
   });
 });
 

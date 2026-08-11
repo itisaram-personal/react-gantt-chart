@@ -204,6 +204,11 @@ export class GanttEngine<T = unknown, G = unknown> {
     const next = resolveOptions(partial, previous);
     this.options = next;
     if (affectsLayout(previous, next)) this.invalidateLayout();
+    // Switching selection off drops what is selected: leaving it behind would
+    // strand a highlight the user has no gesture left to clear.
+    if (previous.interaction.selection && !next.interaction.selection) {
+      this.selection.clear();
+    }
     this.events.emit('options:change', next);
   }
 

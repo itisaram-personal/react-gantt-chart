@@ -1,6 +1,6 @@
 {
   "name": "react-gantt-chart",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "High-performance Gantt chart library for React, built on ECharts custom series.",
   "workspaces": [

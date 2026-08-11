@@ -38,6 +38,14 @@ const SNAPS: { label: string; value: number }[] = [
   { label: "1h", value: HOUR },
   { label: "1d", value: DAY },
 ];
+/** Dwell on a bar before its tooltip opens. The chart's own default is 1s. */
+const TOOLTIP_DELAYS: { label: string; value: number }[] = [
+  { label: "none", value: 0 },
+  { label: "0.3s", value: 300 },
+  { label: "1s", value: 1000 },
+  { label: "2s", value: 2000 },
+];
+
 /** Tasks generated per row — drives how much there is to stack. */
 const PER_ROW = [25, 50, 100, 200, 500, 1000, 2000];
 /**
@@ -130,8 +138,11 @@ export function App(): JSX.Element {
   const [uniformRows, setUniformRows] = useState(true);
   const [rollup, setRollup] = useState(true);
   const [snapMs, setSnapMs] = useState(0);
+  const [tooltipDelay, setTooltipDelay] = useState(1000);
   const [showDependencies, setShowDependencies] = useState(true);
   const [colorByStatus, setColorByStatus] = useState(true);
+  const [enableSelection, setEnableSelection] = useState(true);
+  const [marqueeSelection, setMarqueeSelection] = useState(false);
   const [selection, setSelection] = useState<GanttId[]>([]);
 
   const dataset = useMemo(
@@ -300,6 +311,10 @@ export function App(): JSX.Element {
       stacking: { enabled: stacking, rollupCollapsed: rollup, maxLanes },
       interaction: {
         snapMs,
+        // Ctrl is the band in *add* mode, so a ctrl-drag extends the selection
+        // from anywhere in the plot — empty space, a bar, even a bar already
+        // selected. Mapping it to `pan` is what stops that, since a modifier
+        // only reaches over a bar when the map says it draws a band.
         backgroundDrag: { alt: "pan", plain: "pan", ctrl: "marquee", shift: "marquee" },
       },
     }),
@@ -631,6 +646,20 @@ export function App(): JSX.Element {
           </select>
         </label>
 
+        <label className="app__field" title="How long the pointer must rest on a bar before its tooltip opens">
+          Tooltip delay
+          <select
+            value={tooltipDelay}
+            onChange={(event) => setTooltipDelay(Number(event.target.value))}
+          >
+            {TOOLTIP_DELAYS.map((delay) => (
+              <option key={delay.label} value={delay.value}>
+                {delay.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <Toggle label="Dark" checked={dark} onChange={setDark} />
         <Toggle label="Stacking" checked={stacking} onChange={setStacking} />
         <Toggle
@@ -647,6 +676,18 @@ export function App(): JSX.Element {
         />
         <Toggle label="Links" checked={showDependencies} onChange={setShowDependencies} />
         <Toggle label="Colour by status" checked={colorByStatus} onChange={setColorByStatus} />
+        <Toggle
+          label="Selection"
+          checked={enableSelection}
+          onChange={setEnableSelection}
+          title="Off closes every route into a selection — click, marquee, ctrl+A, arrows"
+        />
+        <Toggle
+          label="Drag to select"
+          checked={marqueeSelection}
+          onChange={setMarqueeSelection}
+          title="Drag a box anywhere — background or bar — to select; trades away drag-to-move"
+        />
 
         <TimeRangePicker engine={engine} />
 
@@ -749,6 +790,9 @@ export function App(): JSX.Element {
           engineRef={setEngine}
           exportRef={exporter}
           headerCorner={<span>{rowCounts.total.toLocaleString()} rows</span>}
+          enableSelection={enableSelection}
+          enableMarqueeSelection={marqueeSelection}
+          tooltipOpenDelay={tooltipDelay}
           showTimeZoomBar={true}
           showRowZoomBar={true}
           showScrollbar={false}
@@ -778,9 +822,10 @@ export function App(): JSX.Element {
         {lastDrop ? <span className="app__muted">drop: {lastDrop}</span> : null}
         {exportNote ? <span className="app__muted">{exportNote}</span> : null}
         <span className="app__hint">
-          drag bars · drag edges to resize · drag empty space to pan · shift+drag marquees · wheel
-          scrolls · ctrl+wheel zooms · right-click for menu · hover a row label for ⋯ and the power
-          button · faded rows are disabled and ignore input
+          drag <em>selected</em> bars to move them · drag edges to resize · drag anything else to
+          pan · ctrl+drag extends the selection · shift+drag marquees · wheel scrolls · ctrl+wheel
+          zooms · right-click for menu · hover a row label for ⋯ and the power button · faded rows
+          are disabled and ignore input
         </span>
       </footer>
     </div>

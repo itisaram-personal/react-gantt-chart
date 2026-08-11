@@ -51,8 +51,11 @@ const undo = () => {
 | `itemRenderer` | draw bars yourself |
 | `dependencies` | arrow links; installs the dependency plugin for you |
 | `plugins` | your own engine plugins |
+| `enableSelection` | master switch for selecting bars (default on); `false` closes every route into a selection |
+| `enableMarqueeSelection` | master switch for the rubber band; on trades drag-to-move for it, `false` drops the box for every modifier |
 | `tooltip` | custom body, or `false` to disable |
 | `tooltipInteractive` | let the pointer into the tooltip (default); `false` for a label that never takes a click |
+| `tooltipOpenDelay` | dwell on a bar before its tooltip opens, ms (default `1000`); `0` opens on contact |
 | `contextMenuItems` | replace the default right-click menu |
 | `rowMenuItems` | items for the gutter's per-row ⋯ button; `[]` drops it for that row |
 | `renderRow` | replace gutter row rendering |
@@ -66,6 +69,83 @@ const undo = () => {
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
 `onRowDisabledChange`, `onViewportChange`, and `onDragEnd` (below).
+
+## Tooltips
+
+The tooltip waits for the pointer to rest on a bar before it opens — one second
+by default, so sweeping across a row raises nothing:
+
+```tsx
+<GanttChart tasks={tasks} groups={groups} tooltipOpenDelay={300} />
+```
+
+The dwell is per bar and starts over on each one. Leaving before it is up opens
+nothing; moving to a second bar takes the first one's tooltip down at once
+rather than leaving it over the wrong task while the new wait runs. `0` opens on
+contact, and `tooltip={false}` drops the tooltip altogether.
+
+## Selection
+
+Two props cover the common cases; `options.interaction` is still there for
+anything finer.
+
+```tsx
+<GanttChart tasks={tasks} groups={groups} enableSelection={false} />
+```
+
+`enableSelection={false}` closes every route into a selection: clicking a bar,
+ctrl/shift-clicking, the rubber band, ctrl+A, the arrow keys and the menu items
+that select. Bars still hover, click (`onTaskClick` keeps firing), drag and
+resize — they just never light up. Switching it off clears whatever was selected,
+since no gesture would be left to clear it. `engine.selection.set(...)` still
+works: an API call is your decision, not user input to be filtered.
+
+```tsx
+<GanttChart tasks={tasks} groups={groups} enableMarqueeSelection />
+```
+
+`enableMarqueeSelection` turns the left-drag into a rubber band that selects
+every bar it covers, started from anywhere in the plot — empty background *or* a
+bar. Moving and resizing bars by dragging is switched off in exchange, since one
+gesture cannot do both; a click on a bar still selects it and fires
+`onTaskClick`. Ctrl/meta adds to the selection, alt removes from it, as with the
+background marquee. `enableSelection={false}` outranks it.
+
+It is the master switch for the band, so `enableMarqueeSelection={false}` is not
+merely "a plain drag pans": no box is drawn by any modifier, where ctrl and
+shift otherwise would. Leave the prop unset to keep whatever `options.interaction`
+says — which, left alone, is the default of ctrl/shift rubber-banding.
+
+Turning the props off hands back the rest of what they took — drag, resize and
+the plain background gesture — using your own `options.interaction` if you set
+one, and the library default if you did not.
+
+## Moving a bar
+
+A drag picks up a bar only once it is **selected**. On an unselected one the
+press runs the background gesture instead — a plain drag pans, ctrl/shift
+rubber-bands — so a stray drag scrolls the chart rather than rescheduling work
+nobody aimed at. Selecting takes one click first, which is exactly what the
+release of that same press does when it never travelled far enough to be a drag,
+and the cursor says which of the two you will get: `pointer` over an unselected
+bar, `grab` over a selected one. Resize handles are unaffected.
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  groups={groups}
+  options={{ interaction: { dragSelectedOnly: false } }}
+/>
+```
+
+`dragSelectedOnly: false` restores the pick-up-anything behaviour, where the
+press selects the bar and carries it in one gesture.
+
+Modifiers outrank the bar either way: a drag held with a modifier that
+`options.interaction.backgroundDrag` maps to `'marquee'` draws the band wherever
+it starts, over a bar as readily as over empty space. With the default map that
+makes **ctrl-drag extend the selection** — it adds every bar the box covers,
+rather than moving the ones already selected — and shift-drag replaces it.
 
 ## When a drag ends
 

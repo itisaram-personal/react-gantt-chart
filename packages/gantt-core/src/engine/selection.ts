@@ -15,9 +15,10 @@ export type SelectionMode = 'replace' | 'add' | 'remove' | 'toggle';
  *
  * Everything that stands in for a gesture — {@link handleClick},
  * {@link selectRect}, {@link moveFocus}, {@link selectAll}, {@link invert} and
- * range building — skips tasks on disabled rows. The plain setters
- * ({@link set}, {@link add}, {@link toggle}) do not: an explicit API call is
- * the consumer's own decision, not user input to be filtered.
+ * range building — skips tasks on disabled rows, and does nothing at all when
+ * `interaction.selection` is off. The plain setters ({@link set}, {@link add},
+ * {@link toggle}, {@link clear}) do neither: an explicit API call is the
+ * consumer's own decision, not user input to be filtered.
  */
 export class SelectionEngine<T = unknown, G = unknown> {
   constructor(private readonly ctx: EngineContext<T, G>) {}
@@ -63,7 +64,13 @@ export class SelectionEngine<T = unknown, G = unknown> {
     this.commit(EMPTY_SELECTION, null);
   }
 
+  /** Is selection switched on at all? Guards every gesture-level entry point. */
+  private get enabled(): boolean {
+    return this.ctx.getOptions().interaction.selection;
+  }
+
   selectAll(): void {
+    if (!this.enabled) return;
     const layout = this.ctx.getLayout();
     const model = this.ctx.getModel();
     const next = new Set<GanttId>();
@@ -76,6 +83,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
   }
 
   invert(): void {
+    if (!this.enabled) return;
     const layout = this.ctx.getLayout();
     const model = this.ctx.getModel();
     const current = this.selected;
@@ -160,6 +168,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
    * `x` in epoch ms, `y` in content pixels.
    */
   selectRect(rect: Rect, mode: SelectionMode = 'replace'): GanttId[] {
+    if (!this.enabled) return [];
     const model = this.ctx.getModel();
     const indices = queryRect(
       model,
@@ -202,6 +211,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
    * nothing reachable in that direction.
    */
   moveFocus(delta: number, extend = false): GanttId | null {
+    if (!this.enabled) return null;
     const model = this.ctx.getModel();
     const layout = this.ctx.getLayout();
     const count = layout.rankToTask.length;

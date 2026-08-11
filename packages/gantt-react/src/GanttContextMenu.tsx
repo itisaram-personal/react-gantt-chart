@@ -200,15 +200,22 @@ function defaultItems<T, G>(
 
   if (items.length > 0) items.push({ id: 'sep-1', separator: true });
 
+  // A chart with selection switched off gets no selection items at all: the
+  // engine would refuse them anyway, and offering them is a false promise.
+  if (engine.getOptions().interaction.selection) {
+    items.push(
+      { id: 'select-all', label: 'Select all', onSelect: () => engine.selection.selectAll() },
+      {
+        id: 'clear-selection',
+        label: selectionCount > 0 ? `Clear selection (${selectionCount})` : 'Clear selection',
+        disabled: selectionCount === 0,
+        onSelect: () => engine.selection.clear(),
+      },
+      { id: 'sep-2', separator: true },
+    );
+  }
+
   items.push(
-    { id: 'select-all', label: 'Select all', onSelect: () => engine.selection.selectAll() },
-    {
-      id: 'clear-selection',
-      label: selectionCount > 0 ? `Clear selection (${selectionCount})` : 'Clear selection',
-      disabled: selectionCount === 0,
-      onSelect: () => engine.selection.clear(),
-    },
-    { id: 'sep-2', separator: true },
     { id: 'fit', label: 'Fit to timeline', onSelect: () => engine.viewport.fitTime() },
     { id: 'expand-all', label: 'Expand all groups', onSelect: () => engine.expandAll() },
     { id: 'collapse-all', label: 'Collapse all groups', onSelect: () => engine.collapseAll() },
@@ -250,8 +257,8 @@ function defaultRowItems<T, G>(row: GanttRow<G>, engine: GanttEngine<T, G>): Gan
       id: 'select-row',
       label: empty ? 'Select tasks in row' : `Select ${indices.length} task${indices.length === 1 ? '' : 's'}`,
       // Selecting into a disabled row would hand back exactly the interaction
-      // the row opted out of.
-      disabled: empty || row.disabled,
+      // the row opted out of, and a chart with selection off has none to give.
+      disabled: empty || row.disabled || !engine.getOptions().interaction.selection,
       onSelect: () => engine.selection.set(indices.map((index) => tasks[index].id)),
     },
     {

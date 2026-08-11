@@ -154,4 +154,46 @@ describe('selection', () => {
     engine.selection.handleClick('a2', { ctrl: true });
     expect([...engine.selection.selected]).toEqual(['a2']);
   });
+
+  it('closes every gesture route into a selection when it is switched off', () => {
+    const engine = makeEngine();
+    engine.setOptions({ interaction: { selection: false } });
+
+    engine.selection.handleClick('a1');
+    engine.selection.selectAll();
+    engine.selection.invert();
+    expect(engine.selection.selectRect({ x: 0, y: 0, width: 1000, height: 1000 })).toEqual([]);
+    expect(engine.selection.moveFocus(1)).toBeNull();
+
+    expect(engine.selection.selected.size).toBe(0);
+  });
+
+  it('still selects through the API when the gestures are switched off', () => {
+    const engine = makeEngine();
+    engine.setOptions({ interaction: { selection: false } });
+
+    // An explicit call is the app's own decision, not user input to filter.
+    engine.selection.set(['a1', 'a2']);
+    expect([...engine.selection.selected].sort()).toEqual(['a1', 'a2']);
+
+    engine.selection.toggle('a3');
+    expect(engine.selection.selected.size).toBe(3);
+    engine.selection.clear();
+    expect(engine.selection.selected.size).toBe(0);
+  });
+
+  it('drops the selection when selection is switched off', () => {
+    const engine = makeEngine();
+    const changes = vi.fn();
+    engine.selection.handleClick('a1');
+    engine.on('selection:change', changes);
+
+    engine.setOptions({ interaction: { selection: false } });
+    expect(engine.selection.selected.size).toBe(0);
+    expect(changes).toHaveBeenCalledTimes(1);
+
+    // Switching it back on does not bring it back.
+    engine.setOptions({ interaction: { selection: true } });
+    expect(engine.selection.selected.size).toBe(0);
+  });
 });

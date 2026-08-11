@@ -93,12 +93,29 @@ describe('attach / detach', () => {
 });
 
 describe('click and selection', () => {
-  it('selects a bar on press so the same gesture can drag it', () => {
+  it('selects an already-selected bar on press so the same gesture can drag it', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
     dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
     expect(Array.from(engine.selection.selected)).toEqual(['g0-t0']);
+    expect(engine.drag.state?.originTaskId).toBe('g0-t0');
     expect(dom.captured).toEqual([1]);
     expect(dom.focused).toBe(1);
+  });
+
+  it('defers selection to the release for an unselected bar', () => {
+    const { engine, dom } = setup();
+    // The press is a pan, not a pick-up: nothing is selected and no drag is
+    // armed until the release says it was a click.
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(engine.selection.selected.size).toBe(0);
+    expect(engine.drag.state).toBeNull();
+    expect(dom.captured).toEqual([1]);
+    expect(dom.focused).toBe(1);
+
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(Array.from(engine.selection.selected)).toEqual(['g0-t0']);
   });
 
   it('emits task:click when the press never became a drag', () => {
@@ -163,6 +180,7 @@ describe('click and selection', () => {
 describe('drag', () => {
   it('moves the pressed bar and proposes a change on release', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
     const ends: { changes: TaskChange[]; cancelled: boolean }[] = [];
     engine.on('drag:end', (payload) => ends.push(payload));
 
@@ -187,6 +205,7 @@ describe('drag', () => {
 
   it('does not fire a click for a gesture that did drag', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
     let clicks = 0;
     engine.on('task:click', () => clicks++);
 
@@ -198,6 +217,7 @@ describe('drag', () => {
 
   it('ignores movement below the drag threshold', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
     let starts = 0;
     engine.on('drag:start', () => starts++);
 
@@ -226,6 +246,8 @@ describe('drag', () => {
 
   it('moves a single-row selection between rows', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
     dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
     // One row down: rows are 34px tall.
     dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 10, ON_BAR.y + 34));
@@ -265,6 +287,7 @@ describe('drag', () => {
   it('snaps the delta when the engine asks for it', () => {
     const { engine, dom } = setup();
     engine.setOptions({ interaction: { snapMs: DAY } });
+    engine.selection.set(['g0-t0']);
 
     dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
     dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
@@ -276,6 +299,7 @@ describe('drag', () => {
 
   it('abandons the gesture on pointercancel', () => {
     const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
     const ends: { cancelled: boolean }[] = [];
     engine.on('drag:end', (payload) => ends.push(payload));
 
@@ -297,6 +321,91 @@ describe('drag', () => {
     expect(engine.drag.state).toBeNull();
     // Selection still works — only the gesture is refused.
     expect(engine.selection.isSelected('g0-t0')).toBe(true);
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
+  });
+});
+
+describe('dragSelectedOnly', () => {
+  it('pans instead of picking up a bar that is not selected', () => {
+    const { engine, dom } = setup();
+    const before = engine.viewport.state.timeStart;
+    let starts = 0;
+    engine.on('drag:start', () => starts++);
+
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x - 100, ON_BAR.y));
+
+    expect(starts).toBe(0);
+    expect(engine.drag.state).toBeNull();
+    expect(engine.viewport.state.timeStart - before).toBeCloseTo(100 * MS_PER_PX, 6);
+
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x - 100, ON_BAR.y));
+    // A drag is not a click, so the bar it started on stays unselected.
+    expect(engine.selection.selected.size).toBe(0);
+    expect(engine.getTask('g0-t0')?.start).toBe(T0);
+  });
+
+  it('picks the bar up once it is selected', () => {
+    const { engine, dom } = setup();
+    // Click first: that is what selects it.
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+
+    const before = engine.viewport.state.timeStart;
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
+
+    expect(engine.drag.isDragging).toBe(true);
+    expect(engine.viewport.state.timeStart).toBe(before);
+
+    const [change] = engine.drag.preview();
+    expect(change.start - change.previous.start).toBeCloseTo(100 * MS_PER_PX, 6);
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
+  });
+
+  it('still resizes an unselected bar from its edge handle', () => {
+    const { engine, dom } = setup();
+    dom.dispatch('pointerdown', pointerEvent(2, ON_BAR.y));
+    expect(engine.drag.state?.mode).toBe('resize-start');
+    dom.dispatch('pointerup', pointerEvent(2, ON_BAR.y));
+  });
+
+  it('marquees from an unselected bar when the modifier maps to one', () => {
+    const { engine, dom } = setup();
+    // Shift is a marquee on the background, and so it is over a bar the drag
+    // may not carry.
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y, { shift: true }));
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 300, ON_BAR.y + 40, { shift: true }));
+    expect(engine.store.getState().marquee).not.toBeNull();
+    expect(engine.drag.state).toBeNull();
+
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x + 300, ON_BAR.y + 40, { shift: true }));
+    expect(engine.store.getState().marquee).toBeNull();
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('still clicks the bar when the resolved background action is none', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { backgroundDrag: { plain: 'none' } } });
+
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
+    expect(engine.drag.state).toBeNull();
+    expect(engine.selection.selected.size).toBe(0);
+
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('picks up any bar when switched off', () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { dragSelectedOnly: false } });
+
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
+    expect(engine.drag.isDragging).toBe(true);
     dom.dispatch('pointerup', pointerEvent(ON_BAR.x + 100, ON_BAR.y));
   });
 });
@@ -353,6 +462,51 @@ describe('marquee', () => {
     dom.dispatch('pointerup', pointerEvent(100, 100, { alt: true }));
     expect(engine.selection.selected.size).toBeLessThan(grown);
     expect(engine.selection.isSelected('g0-t0')).toBe(true);
+  });
+
+  it('extends the selection with a ctrl-drag that starts on a selected bar', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
+    // Ctrl maps to the band, so it draws one wherever the press lands — a
+    // selected bar included, which would otherwise be picked up and moved.
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y, { ctrl: true }));
+    expect(engine.store.getState().marquee).not.toBeNull();
+    expect(engine.drag.state).toBeNull();
+
+    dom.dispatch('pointermove', pointerEvent(700, 100, { ctrl: true }));
+    dom.dispatch('pointerup', pointerEvent(700, 100, { ctrl: true }));
+
+    expect(engine.store.getState().marquee).toBeNull();
+    // The bar it started on keeps its place in the selection, and the band's
+    // catch is added to it.
+    expect(engine.selection.isSelected('g0-t0')).toBe(true);
+    expect(engine.selection.selected.size).toBeGreaterThan(1);
+    // Nothing was moved on the way.
+    expect(engine.getTask('g0-t0')?.start).toBe(T0);
+  });
+
+  it('bands from a bar edge too, rather than resizing, under a marquee modifier', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
+    // x = 2 is inside the left resize handle.
+    dom.dispatch('pointerdown', pointerEvent(2, ON_BAR.y, { ctrl: true }));
+    expect(engine.drag.state).toBeNull();
+    expect(engine.store.getState().marquee).not.toBeNull();
+    dom.dispatch('pointerup', pointerEvent(2, ON_BAR.y, { ctrl: true }));
+  });
+
+  it('leaves a modified press alone when that modifier does not map to the band', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
+    // Alt pans by default, so it is not a band and must not become one: the
+    // press keeps the bar.
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y, { alt: true }));
+    expect(engine.store.getState().marquee).toBeNull();
+    expect(engine.drag.state?.originTaskId).toBe('g0-t0');
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x, ON_BAR.y, { alt: true }));
   });
 
   it('pans the background instead when marquee is disabled', () => {
@@ -512,8 +666,10 @@ describe('hover', () => {
     expect(engine.store.getState().hoveredRowIndex).toBeNull();
   });
 
-  it('shows a resize cursor over an edge and a grab cursor over the body', () => {
-    const { dom } = setup();
+  it('shows a resize cursor over an edge and a grab cursor over a selected body', () => {
+    const { engine, dom } = setup();
+    engine.selection.set(['g0-t0']);
+
     dom.dispatch('pointermove', pointerEvent(2, ON_BAR.y));
     expect(dom.style.cursor).toBe('ew-resize');
 
@@ -522,6 +678,17 @@ describe('hover', () => {
 
     dom.dispatch('pointermove', pointerEvent(EMPTY_SPACE.x, EMPTY_SPACE.y));
     expect(dom.style.cursor).toBe('');
+  });
+
+  it('offers a click cursor over a bar a drag would not carry', () => {
+    const { engine, dom } = setup();
+    // Unselected: the body is a click target, and the grab hand would be a lie.
+    dom.dispatch('pointermove', pointerEvent(40, ON_BAR.y));
+    expect(dom.style.cursor).toBe('pointer');
+
+    engine.selection.set(['g0-t0']);
+    dom.dispatch('pointermove', pointerEvent(41, ON_BAR.y));
+    expect(dom.style.cursor).toBe('grab');
   });
 
   it('does not re-hit-test while a gesture is running', () => {

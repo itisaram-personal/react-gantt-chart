@@ -72,10 +72,27 @@ type Gesture =
       kind: 'task';
       pointerId: number;
       taskId: GanttId;
-      wasSelected: boolean;
+      /**
+       * Run click selection semantics on a no-travel release. False when the
+       * press already ran them, so the drag could carry what it selected.
+       */
+      clickSelects: boolean;
       modifiers: PointerModifiers;
     }
-  | { kind: 'marquee'; pointerId: number; origin: Point; mode: MarqueeMode }
+  | {
+      kind: 'marquee';
+      pointerId: number;
+      origin: Point;
+      mode: MarqueeMode;
+      /** Modifiers at press, for click semantics on a no-travel release. */
+      modifiers: PointerModifiers;
+      /**
+       * The bar the press landed on, when the marquee was started from one
+       * (`interaction.marqueeOnTasks`). A release too small to be a drag is then
+       * a click on that bar rather than on the background.
+       */
+      taskId: GanttId | null;
+    }
   | {
       kind: 'pan';
       pointerId: number;
@@ -85,6 +102,13 @@ type Gesture =
       modifiers: PointerModifiers;
       /** False for middle-button pans, which never stand in for a click. */
       click: boolean;
+      /**
+       * The bar the press landed on, when a press on an unselected bar fell
+       * through to the pan (`interaction.dragSelectedOnly`). A release that
+       * never travelled is then a click on that bar rather than on the
+       * background.
+       */
+      taskId: GanttId | null;
     };
 
 const schedule: (callback: () => void) => number =
@@ -291,15 +315,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     // Middle button pans, matching every map and timeline tool.
     if (event.button === 1) {
       event.preventDefault();
-      this.gesture = {
-        kind: 'pan',
-        pointerId: event.pointerId,
-        origin: point,
-        last: point,
-        modifiers: modifiersOf(event),
-        click: false,
-      };
-      capturePointer(dom, event.pointerId);
+      this.beginPan(point, modifiersOf(event), event.pointerId, dom, { click: false });
       return;
     }
     if (event.button !== 0) return;
@@ -312,14 +328,49 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     // background gesture, so panning and marqueeing still work over the row.
     if (hit.task && !hit.row?.disabled) {
       const taskId = hit.task.id;
+
+      // Drag-to-select claims the gesture: the press starts a rubber band
+      // anchored on the bar instead of picking it up. Selection is deferred to
+      // the release, since there is no drag here to carry it.
+      //
+      // A *modified* press does the same whenever that modifier maps to the
+      // band, bars included: ctrl-drag extends the selection over everything it
+      // covers rather than picking the pressed bar up — which is the one thing
+      // a bar could otherwise never be the start of. An unmodified press is
+      // left to `marqueeOnTasks`, so a `plain: 'marquee'` map does not quietly
+      // cost every chart its drag-to-move.
+      if (
+        this.marqueeStartsOnTasks() ||
+        (hasModifier(modifiers) && this.backgroundDragAction(modifiers) === 'marquee')
+      ) {
+        this.beginMarquee(point, modifiers, taskId, event.pointerId, dom);
+        return;
+      }
+
       const wasSelected = this.engine.selection.isSelected(taskId);
+      const mode = this.resizeModeAt(taskId, point);
+
+      // A move picks the bar up only once it is selected: on an unselected one
+      // the press runs the background gesture instead, so a stray drag pans the
+      // chart rather than rescheduling work nobody aimed at. Resize handles are
+      // exempt — the cursor there has already promised a resize.
+      if (mode === 'move' && !wasSelected && interaction.drag && interaction.dragSelectedOnly) {
+        this.beginUnselectedTaskGesture(point, modifiers, taskId, event.pointerId, dom);
+        return;
+      }
+
       // Selecting on press (not release) is what lets the same gesture drag the
       // task it just selected.
       if (!wasSelected && interaction.selection) this.engine.selection.handleClick(taskId, modifiers);
 
-      const mode = this.resizeModeAt(taskId, point);
       this.engine.drag.begin(taskId, point, { mode, selectOnBegin: false });
-      this.gesture = { kind: 'task', pointerId: event.pointerId, taskId, wasSelected, modifiers };
+      this.gesture = {
+        kind: 'task',
+        pointerId: event.pointerId,
+        taskId,
+        clickSelects: wasSelected,
+        modifiers,
+      };
       capturePointer(dom, event.pointerId);
       return;
     }
@@ -331,20 +382,89 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     }
 
     if (action === 'marquee') {
-      const mode = marqueeModeOf(modifiers);
-      this.gesture = { kind: 'marquee', pointerId: event.pointerId, origin: point, mode };
-      this.engine.store.setState({ marquee: { x: point.x, y: point.y, width: 0, height: 0 } });
-    } else {
-      this.gesture = {
-        kind: 'pan',
-        pointerId: event.pointerId,
-        origin: point,
-        last: point,
-        modifiers,
-        click: true,
-      };
+      this.beginMarquee(point, modifiers, null, event.pointerId, dom);
+      return;
     }
-    capturePointer(dom, event.pointerId);
+    this.beginPan(point, modifiers, event.pointerId, dom);
+  }
+
+  /**
+   * A press on a bar that is not selected, with `interaction.dragSelectedOnly`
+   * on.
+   *
+   * The gesture becomes whatever the same press on empty background would be,
+   * anchored on the bar so a release that never travelled is still a click on
+   * it — which is what selects the bar, ready for the next drag to carry it. A
+   * modifier mapped to `'none'` leaves that click and nothing else.
+   */
+  private beginUnselectedTaskGesture(
+    point: Point,
+    modifiers: PointerModifiers,
+    taskId: GanttId,
+    pointerId: number,
+    dom: HTMLElement,
+  ): void {
+    const action = this.backgroundDragAction(modifiers);
+    if (action === 'marquee') {
+      this.beginMarquee(point, modifiers, taskId, pointerId, dom);
+      return;
+    }
+    if (action === 'pan') {
+      this.beginPan(point, modifiers, pointerId, dom, { taskId });
+      return;
+    }
+    // No drag armed: the gesture exists only to carry the click on release.
+    this.gesture = { kind: 'task', pointerId, taskId, clickSelects: true, modifiers };
+    capturePointer(dom, pointerId);
+  }
+
+  /**
+   * Does a press on a bar start a rubber band rather than pick the bar up?
+   *
+   * Needs the marquee to be drawable at all, so the option cannot leave a press
+   * on a bar doing nothing when selection is switched off underneath it.
+   */
+  private marqueeStartsOnTasks(): boolean {
+    const interaction = this.engine.getOptions().interaction;
+    return interaction.marqueeOnTasks && interaction.marquee && interaction.selection;
+  }
+
+  private beginMarquee(
+    origin: Point,
+    modifiers: PointerModifiers,
+    taskId: GanttId | null,
+    pointerId: number,
+    dom: HTMLElement,
+  ): void {
+    this.gesture = {
+      kind: 'marquee',
+      pointerId,
+      origin,
+      mode: marqueeModeOf(modifiers),
+      modifiers,
+      taskId,
+    };
+    this.engine.store.setState({ marquee: { x: origin.x, y: origin.y, width: 0, height: 0 } });
+    capturePointer(dom, pointerId);
+  }
+
+  private beginPan(
+    origin: Point,
+    modifiers: PointerModifiers,
+    pointerId: number,
+    dom: HTMLElement,
+    options: { click?: boolean; taskId?: GanttId | null } = {},
+  ): void {
+    this.gesture = {
+      kind: 'pan',
+      pointerId,
+      origin,
+      last: origin,
+      modifiers,
+      click: options.click ?? true,
+      taskId: options.taskId ?? null,
+    };
+    capturePointer(dom, pointerId);
   }
 
   /**
@@ -369,6 +489,25 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     // allowed to draw degrades to a pan, as it did before this map existed.
     if (action === 'marquee' && !(interaction.marquee && interaction.selection)) return 'pan';
     return action;
+  }
+
+  /**
+   * A press on a bar that never travelled far enough to be a drag.
+   *
+   * `select` runs click selection semantics; pass false when the press already
+   * ran them. `handleClick` is itself a no-op when selection is off, so this
+   * still emits `task:click` for a chart that only wants the event.
+   */
+  private taskClick(
+    taskId: GanttId,
+    modifiers: PointerModifiers,
+    point: Point,
+    select = true,
+  ): void {
+    const task = this.engine.getTask(taskId);
+    if (!task) return;
+    if (select) this.engine.selection.handleClick(taskId, modifiers);
+    this.engine.events.emit('task:click', { task, modifiers, position: point });
   }
 
   /**
@@ -429,13 +568,9 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
 
         // A press that never became a drag is a click. Re-running click
         // semantics here is what makes ctrl-clicking an already-selected task
-        // deselect it.
-        const task = this.engine.getTask(gesture.taskId);
-        if (!task) return;
-        if (gesture.wasSelected && this.engine.getOptions().interaction.selection) {
-          this.engine.selection.handleClick(gesture.taskId, gesture.modifiers);
-        }
-        this.engine.events.emit('task:click', { task, modifiers: gesture.modifiers, position: point });
+        // deselect it; a task the press already selected must not have them run
+        // twice.
+        this.taskClick(gesture.taskId, gesture.modifiers, point, gesture.clickSelects);
         return;
       }
       case 'marquee': {
@@ -443,21 +578,25 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
         this.engine.store.setState({ marquee: null });
 
         if (rect.width * rect.height < MARQUEE_MIN_AREA) {
-          // A plain click on empty space clears the selection.
-          this.backgroundClick(point, gesture.mode, event);
+          // Too small to be a rubber band, so it was a click — on the bar it
+          // started on, or on empty space, which clears the selection.
+          if (gesture.taskId !== null) this.taskClick(gesture.taskId, gesture.modifiers, point);
+          else this.backgroundClick(point, gesture.mode, event);
           return;
         }
         this.engine.selection.selectRect(this.toContentRect(rect), gesture.mode);
         return;
       }
       case 'pan': {
-        // A pan that never travelled is a click on the background, and has to
-        // mean the same thing there as it does under the marquee gesture.
+        // A pan that never travelled is a click, and has to mean the same thing
+        // here as it does under the marquee gesture — on the bar it started on,
+        // or on the background.
         if (!gesture.click) return;
         const dx = point.x - gesture.origin.x;
         const dy = point.y - gesture.origin.y;
         if (dx * dx + dy * dy <= PAN_CLICK_SLOP * PAN_CLICK_SLOP) {
-          this.backgroundClick(point, marqueeModeOf(gesture.modifiers), event);
+          if (gesture.taskId !== null) this.taskClick(gesture.taskId, gesture.modifiers, point);
+          else this.backgroundClick(point, marqueeModeOf(gesture.modifiers), event);
         }
         return;
       }
@@ -626,8 +765,19 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       dom.style.cursor = '';
       return;
     }
-    const mode = this.resizeModeAt(taskId, point);
-    dom.style.cursor = mode === 'move' ? 'grab' : 'ew-resize';
+    if (this.resizeModeAt(taskId, point) !== 'move') {
+      dom.style.cursor = 'ew-resize';
+      return;
+    }
+    // A bar that cannot be picked up must not offer the grab hand: with drag
+    // off — or unselected, where a drag pans instead — it is a click target, or
+    // nothing at all when selection is off too.
+    const interaction = this.engine.getOptions().interaction;
+    const movable =
+      interaction.drag &&
+      (!interaction.dragSelectedOnly || this.engine.selection.isSelected(taskId));
+    if (movable) dom.style.cursor = 'grab';
+    else dom.style.cursor = interaction.selection ? 'pointer' : '';
   }
 
   /** Plot-pixel rect → the time/content-pixel rect `selectRect` expects. */
@@ -666,6 +816,10 @@ function releasePointer(dom: HTMLElement | null, pointerId: number): void {
 
 function modifiersOf(event: MouseEvent | PointerEvent | KeyboardEvent): PointerModifiers {
   return { ctrl: event.ctrlKey, shift: event.shiftKey, meta: event.metaKey, alt: event.altKey };
+}
+
+function hasModifier(modifiers: PointerModifiers): boolean {
+  return modifiers.ctrl || modifiers.meta || modifiers.shift || modifiers.alt;
 }
 
 /** Alt removes from the selection, ctrl/meta adds, anything else replaces. */

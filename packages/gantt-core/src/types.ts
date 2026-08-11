@@ -218,6 +218,43 @@ export interface InteractionOptions {
    */
   marquee: boolean;
   /**
+   * A left-drag that starts *on a bar* draws a marquee instead of moving it.
+   *
+   * Off by default, where a press on a bar belongs to that bar and the marquee
+   * can only be drawn from empty background. Turning it on makes the rubber band
+   * reachable from anywhere in the plot, at the cost of the drag-to-move
+   * gesture — set {@link drag} and {@link resize} to false alongside it, or a
+   * bar becomes the one place the marquee cannot start.
+   *
+   * A press that never travels far enough to be a drag is still a click on that
+   * bar: it selects it and emits `task:click`.
+   *
+   * Needs {@link marquee} and {@link selection}; without either, a press on a
+   * bar behaves as it does with this off.
+   */
+  marqueeOnTasks: boolean;
+  /**
+   * A bar has to be selected before a drag can move it.
+   *
+   * On by default. A press on an *unselected* bar runs the background gesture
+   * instead — a plain drag pans, a modifier drag rubber-bands, per
+   * {@link backgroundDrag} — so a stray drag scrolls the chart rather than
+   * rescheduling work nobody aimed at. Selecting the bar takes one click first,
+   * which is exactly what the release of that same press does when it never
+   * travelled far enough to be a drag.
+   *
+   * Resize handles are unaffected: grabbing a 6px edge is deliberate enough on
+   * its own, and the cursor has already promised a resize.
+   *
+   * Set false for the pick-up-anything behaviour, where the press selects the
+   * bar and carries it in one gesture.
+   *
+   * Gesture-level, like the rest of {@link InteractionOptions}: calling
+   * `engine.drag.begin` directly is the consumer's own decision and is never
+   * filtered by this.
+   */
+  dragSelectedOnly: boolean;
+  /**
    * Gesture for a left-button drag on empty background, keyed by modifier.
    *
    * Resolved with the same precedence as {@link InteractionOptions.wheel}:

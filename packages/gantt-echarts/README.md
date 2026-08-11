@@ -54,15 +54,31 @@ Renders are coalesced into an animation frame and driven by store subscriptions;
 
 | gesture | result |
 | --- | --- |
-| click a bar | select (press selects, so the same gesture can drag) |
+| click a bar | select it (on release for an unselected bar, on press for one already selected, so the same gesture can drag it) |
 | ctrl / shift click | toggle, or range over visual order |
-| drag a bar | move the selection; free x/y within one row, x-only across rows |
-| drag a bar edge | resize that bar |
+| drag a **selected** bar | move the selection; free x/y within one row, x-only across rows |
+| drag an unselected bar | the background gesture — a plain drag pans, ctrl/shift rubber-bands |
+| drag a bar edge | resize that bar, selected or not |
+| ctrl / shift drag | marquee select from anywhere, bars included — ctrl adds to the selection |
 | drag empty space | marquee select (ctrl adds, alt removes) |
 | middle-drag | pan |
 | wheel | scroll · ctrl zooms at the pointer · shift pans (all remappable) |
 | right-click | open the context menu on task, row or background |
 | keys | arrows, page/home/end, `+`/`-`, ctrl+A, Escape |
+
+A bar has to be selected before a drag will move it, so a stray drag scrolls the
+chart rather than rescheduling work nobody aimed at — the release of that same
+press is what selects it, and the cursor says which of the two you will get
+(`pointer` over an unselected bar, `grab` over a selected one). Set
+`interaction.dragSelectedOnly: false` for the pick-up-anything behaviour, where
+the press selects the bar and carries it in one gesture.
+
+A *modified* drag follows `interaction.backgroundDrag` wherever it starts: with
+the default map, ctrl and shift draw a rubber band from over a bar as readily as
+from empty space — ctrl in add mode, so ctrl-dragging extends the selection
+instead of moving what is already in it. An unmodified press on a bar is left to
+`marqueeOnTasks`, so a `plain: 'marquee'` map does not quietly cost a chart its
+drag-to-move.
 
 Wheel behaviour comes from `engine.getOptions().interaction.wheel`, so an app can
 remap it without touching the adapter.

@@ -94,7 +94,9 @@ bars — the part that can number in the thousands — go through the canvas.
 - **Group tree** — nest groups via `parentId`, collapse at any depth, with
   optional roll-up of hidden descendants onto the nearest visible ancestor.
 - **Selection** — click, ctrl-click, shift-range over *visual* order, marquee,
-  select-all/invert, keyboard navigation.
+  select-all/invert, keyboard navigation. `enableSelection={false}` closes every
+  route into a selection at once; `enableMarqueeSelection` makes the drag a
+  rubber band you can start on a bar, in place of drag-to-move.
 - **Disabled rows** — a button after each y-axis label switches a row off: it
   keeps its bars, faded, but ignores every interaction with them and is no
   longer a drop target. Seed it with `group.disabled`, drive it with
@@ -103,10 +105,16 @@ bars — the part that can number in the thousands — go through the canvas.
   per modifier. `interaction.backgroundDrag` maps `plain`/`ctrl`/`shift`/`alt`
   to `'marquee' | 'pan' | 'none'`; the default pans on a plain drag and marquees
   on shift or ctrl. Set `plain: 'marquee'` for drag-to-select instead, and
-  `alt: 'marquee'` to regain remove-mode marquee.
+  `alt: 'marquee'` to regain remove-mode marquee. A *modified* drag obeys the
+  map wherever it starts, bars included, so ctrl-drag extends the selection
+  from anywhere in the plot.
 - **Drag & resize** — move a selection horizontally, or freely when it is
   confined to one row; resize from edge handles; optional snapping. Gestures
-  propose `TaskChange[]`; nothing mutates until you accept it.
+  propose `TaskChange[]`; nothing mutates until you accept it. Only a *selected*
+  bar can be picked up: a drag on an unselected one runs the background gesture
+  instead, so a stray drag pans rather than rescheduling work nobody aimed at —
+  the click that selects it is the release of that same press. Turn it off with
+  `interaction.dragSelectedOnly: false`.
 - **Undo/redo** — `GanttHistory` inverts change sets, so history costs nothing
   per task.
 - **PNG export** — `exportRef.current.download()` for what is on screen, or
