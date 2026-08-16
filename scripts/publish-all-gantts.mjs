@@ -8,11 +8,6 @@
  *
  * Anything after `--` is handed to each `npm publish` untouched.
  *
- * A package's `dist/` is deleted once it is on the registry, so a release leaves
- * no build output behind to be mistaken for a current one. Run `npm run build`
- * before anything that reads it again — typecheck resolves the packages through
- * `dist`, and dev needs it too.
- *
  * Each package is published from *inside its own directory* rather than with
  * `npm publish -w`, which is what `.github/workflows/release.yml` does and for
  * the same reason: the token npm mints for trusted publishing is scoped to the
@@ -23,7 +18,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,8 +39,6 @@ const npm = viaCli ? process.execPath : process.platform === "win32" ? "npm.cmd"
 const npmArgs = viaCli ? [npmCli] : [];
 const shell = !viaCli && process.platform === "win32";
 const passThrough = process.argv.slice(2);
-/** A dry run publishes nothing, so there is nothing to clean up after. */
-const dryRun = passThrough.includes("--dry-run");
 
 function manifestOf(dir) {
   try {
@@ -97,25 +90,6 @@ function alreadyPublished(name, version) {
     shell,
   });
   return result.status === 0;
-}
-
-/**
- * Drop a package's build output, now that the registry has a copy of it.
- *
- * Only ever called for a package npm has just accepted, and only for its own
- * `dist` — a failure leaves the tree alone for whoever has to look at it. The
- * removal is never fatal either: the release has already happened by then, and
- * a file Windows will not let go of is not worth failing it over.
- */
-function removeDist(pkg) {
-  const dist = join(packagesDir, pkg.dir, "dist");
-  if (!existsSync(dist)) return;
-  try {
-    rmSync(dist, { recursive: true, force: true });
-    console.log(`  removed packages/${pkg.dir}/dist`);
-  } catch (error) {
-    console.warn(`  could not remove packages/${pkg.dir}/dist: ${error.message}`);
-  }
 }
 
 const found = readdirSync(packagesDir, { withFileTypes: true })
@@ -175,9 +149,7 @@ for (const pkg of queue) {
   }
 
   published.push(label);
-  if (!dryRun) removeDist(pkg);
 }
 
 console.log(`\nDone. Published: ${published.join(", ") || "nothing"}.`);
 if (skipped.length > 0) console.log(`Already on the registry: ${skipped.join(", ")}.`);
-if (published.length > 0 && !dryRun) console.log("Run `npm run build` before using the workspace again.");
