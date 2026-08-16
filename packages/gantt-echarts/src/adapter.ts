@@ -3,6 +3,7 @@ import type {
   GanttEngine,
   GanttId,
   GanttTheme,
+  GanttTimeMarker,
   Point,
   PointerModifiers,
   Rect,
@@ -36,8 +37,12 @@ export interface GanttAdapterOptions<T = unknown, G = unknown> {
   locale?: string;
   weekStartsOn?: 0 | 1;
   tickTargetPx?: number;
-  /** Source for the "now" marker. Return `null` to hide it. */
-  now?: () => number | null;
+  /**
+   * Vertical lines at fixed instants, drawn the full height of the plot. Read
+   * fresh on every frame, so a new array lands on the next render without
+   * re-attaching.
+   */
+  markers?: readonly GanttTimeMarker[];
   showRowBands?: boolean;
   showGrid?: boolean;
   progressiveThreshold?: number;
@@ -235,7 +240,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       ticks: this.ticks,
       locale: this.options.locale,
       weekStartsOn: this.options.weekStartsOn,
-      now: this.options.now ? this.options.now() : Date.now(),
+      markers: this.options.markers,
       showRowBands: this.options.showRowBands,
       showGrid: this.options.showGrid,
       progressiveThreshold: this.options.progressiveThreshold,
@@ -324,9 +329,9 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     const modifiers = modifiersOf(event);
     const hit = this.engine.hitTest(point);
 
-    // A bar on a disabled row is not a target: the press falls through to the
+    // A bar on an inert row is not a target: the press falls through to the
     // background gesture, so panning and marqueeing still work over the row.
-    if (hit.task && !hit.row?.disabled) {
+    if (hit.task && !hit.row?.inert) {
       const taskId = hit.task.id;
 
       // Drag-to-select claims the gesture: the press starts a rubber band
@@ -520,7 +525,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       this.engine.selection.clear();
     }
     const row = this.engine.nearestRow(point.y);
-    if (row && !row.disabled) {
+    if (row && !row.inert) {
       this.engine.events.emit('row:click', { row, modifiers: modifiersOf(event), position: point });
     }
   }
@@ -544,14 +549,14 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       }
       default: {
         const hit = this.engine.hitTest(point);
-        // Hover is reported truthfully, disabled row or not: a disabled row is
-        // still readable, so its bars keep their tooltip, and the row itself
-        // still lights up and reveals its gutter controls. What a disabled row
+        // Hover is reported truthfully, inert row or not: such a row is still
+        // readable, so its bars keep their tooltip, and the row itself still
+        // lights up and reveals its gutter controls. What an inert row
         // withholds is anything that offers input — the emphasis stroke (the
         // item renderer drops it) and the grab cursor (below).
         const taskId = hit.task?.id ?? null;
         this.engine.setHovered(taskId, hit.rowIndex >= 0 ? hit.rowIndex : null);
-        this.updateCursor(hit.row?.disabled ? null : taskId, point);
+        this.updateCursor(hit.row?.inert ? null : taskId, point);
       }
     }
   }
@@ -620,7 +625,7 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
   private onDoubleClick(event: MouseEvent): void {
     const point = this.pointFromEvent(event);
     const hit = this.engine.hitTest(point);
-    if (hit.row?.disabled) return;
+    if (hit.row?.inert) return;
     if (hit.task) {
       this.engine.events.emit('task:dblclick', { task: hit.task, position: point });
       return;
@@ -632,9 +637,9 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
     event.preventDefault();
     const point = this.pointFromEvent(event);
     const hit = this.engine.hitTest(point);
-    // The menu still opens over a disabled row — it is the way back out — but
+    // The menu still opens over an inert row — it is the way back out — but
     // it is about the row, never the bar under the pointer.
-    const task = hit.row?.disabled ? null : hit.task;
+    const task = hit.row?.inert ? null : hit.task;
 
     this.engine.contextMenu.open({
       kind: task ? 'task' : hit.row ? 'row' : 'background',

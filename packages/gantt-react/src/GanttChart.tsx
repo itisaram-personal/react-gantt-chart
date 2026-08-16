@@ -14,6 +14,7 @@ import {
   type GanttPlugin,
   type GanttRow,
   type GanttTask,
+  type GanttTimeMarker,
   type InteractionOptions,
   type Point,
   type TaskChange,
@@ -151,8 +152,9 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   onRowToggle?: (row: GanttRow<G>, collapsed: boolean) => void;
   /**
    * A row was enabled or disabled from the gutter button (or from the engine).
-   * A disabled row keeps its bars but ignores every interaction with them; seed
-   * the state with `group.disabled`.
+   * A disabled row keeps its bars, faded, and by default ignores every
+   * interaction with them — `options.interaction.disabledRows` decides that
+   * part. Seed the state with `group.disabled`.
    */
   onRowDisabledChange?: (row: GanttRow<G>, disabled: boolean) => void;
   onViewportChange?: (viewport: ViewportState) => void;
@@ -240,8 +242,21 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   headerCorner?: ReactNode;
   renderRow?: (row: AxisRowDescriptor<G>) => ReactNode;
 
-  /** Epoch ms for the "now" marker. `null` hides it; omit for the live clock. */
-  now?: number | null;
+  /**
+   * Vertical lines at fixed instants — releases, freezes, sprint boundaries —
+   * drawn the full height of the plot under the bars, with an optional chip
+   * naming each one above them.
+   *
+   * A "today" line is one of these rather than a feature of its own: pass
+   * `{ time: Date.now(), color: theme.colors.todayLine }` (and refresh it on
+   * whatever cadence your app wants the line to move).
+   *
+   * Chrome, not data: markers take no part in layout or hit-testing and never
+   * take pointer input. Off-screen ones cost nothing, so the whole list can be
+   * passed and left to the viewport to filter. Pass a stable reference
+   * (`useMemo`) — a new array identity re-renders the plot.
+   */
+  markers?: readonly GanttTimeMarker[];
   locale?: string;
   weekStartsOn?: 0 | 1;
   renderer?: "canvas" | "svg";
@@ -293,7 +308,6 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     showTimeZoomBar = false,
     showRowZoomBar = false,
     interactiveLabels = true,
-    now,
     locale,
     weekStartsOn,
     renderer,
@@ -412,7 +426,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     itemRenderer: props.itemRenderer,
     locale,
     weekStartsOn,
-    now,
+    markers: props.markers,
     defaults: exportDefaults,
   });
 
@@ -484,7 +498,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             engine={engine}
             theme={theme}
             itemRenderer={props.itemRenderer}
-            now={now}
+            markers={props.markers}
             locale={locale}
             weekStartsOn={weekStartsOn}
             renderer={renderer}
@@ -615,7 +629,7 @@ function withSelectionProps(
  *
  * The drop time comes off the pointer's own x — the gesture's `deltaTime` is
  * snapped, the pointer is not. The row is resolved from the group the origin
- * task *ended up in*, not from what the pointer was over: a drop on a disabled
+ * task *ended up in*, not from what the pointer was over: a drop on an inert
  * row leaves the tasks where they were, and the report has to say so.
  */
 function dragEndEvent<T, G>(

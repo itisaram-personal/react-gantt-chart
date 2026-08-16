@@ -60,7 +60,7 @@ const undo = () => {
 | `rowMenuItems` | items for the gutter's per-row ⋯ button; `[]` drops it for that row |
 | `renderRow` | replace gutter row rendering |
 | `headerCorner` | content for the corner above the gutter |
-| `now` | epoch ms for the marker; `null` hides it, omit for the live clock |
+| `markers` | vertical lines at fixed instants (see below) |
 | `renderer` | `'canvas'` (default) or `'svg'` |
 | `engineRef` | the engine, for toolbars, exports and undo |
 | `exportRef` | a PNG exporter for this chart (see below) |
@@ -69,6 +69,54 @@ const undo = () => {
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
 `onRowDisabledChange`, `onViewportChange`, and `onDragEnd` (below).
+
+## Time markers
+
+`markers` draws vertical lines across the plot. A "today" line is one of these
+rather than a feature of its own — the chart draws none by itself:
+
+```tsx
+const markers = useMemo<GanttTimeMarker[]>(
+  () => [
+    { id: 'freeze', time: freezeAt, label: 'Code freeze', dashed: true },
+    { id: 'release', time: releaseAt, label: 'Release 2.0', color: '#16a34a' },
+    { id: 'quarter', time: q3Start },  // a bare line, no chip
+    { id: 'today', time: Date.now(), color: theme.colors.todayLine },
+  ],
+  [freezeAt, releaseAt, q3Start, theme],
+);
+
+<GanttChart tasks={tasks} groups={groups} markers={markers} />
+```
+
+| field | |
+| --- | --- |
+| `time` | where the line goes, epoch ms |
+| `label` | drawn as a chip at the top of the line; omit for a bare line |
+| `color` | line and chip colour; defaults to the theme's `markerLine` |
+| `lineWidth` | px, default `1.5` |
+| `dashed` | dashed rather than solid |
+| `id` | your own identity; not needed to draw one |
+
+Lines are drawn *under* the bars, so they read as a reference rather than as
+something over the work; the chips are drawn above them, where
+they can be read. Chips are placed left to right and one that would collide with
+the previous chip is dropped — a cluster stays legible as lines. A chip that
+would run off the right edge flips to the left of its line.
+
+There is no `now` prop: the today line is yours, which is what lets it be
+coloured, labelled, positioned and *timed* like any other marker. Colour it
+`theme.colors.todayLine` for the familiar red, and re-date it on whatever
+interval you want it to move — a chart nobody watches for an hour need not tick
+at all, and one that should can `setInterval` its way there. Markers later in the
+list paint over earlier ones, so put it where you want it in the stack.
+
+Markers are chrome, not data: they take no part in layout, stacking or
+hit-testing, take no pointer input, and never move a task. Ones outside the
+visible window cost a comparison and draw nothing, so a year of sprint
+boundaries can be passed and left to the viewport to filter. Pass a stable
+reference (`useMemo`) — a new array identity re-renders the plot — and note that
+PNG exports carry the same markers the screen does.
 
 ## Tooltips
 
@@ -206,12 +254,12 @@ literal is safe there.
 
 Right after each row's label sits a forbidden-sign button that switches the row
 off; once the row is off it stays visible and accented, so there is always a way
-back. A disabled row keeps its bars — faded, so it still reads as data — but
-ignores every interaction with them: selection, clicks, double-clicks, drag,
-resize and marquee, and no drag from elsewhere can drop a task onto it. They do
-still raise their tooltip on hover, since reading a bar changes nothing; what
-they drop is the hover emphasis and the cursor, which would offer input the row
-will not take. Its own controls keep working, so it can still be collapsed,
+back. A disabled row keeps its bars — faded, so it still reads as data — and by
+default ignores every interaction with them: selection, clicks, double-clicks,
+drag, resize and marquee, and no drag from elsewhere can drop a task onto it.
+They do still raise their tooltip on hover, since reading a bar changes nothing;
+what they drop is the hover emphasis and the cursor, which would offer input the
+row will not take. Its own controls keep working, so it can still be collapsed,
 right-clicked and switched back on.
 
 ```tsx
@@ -223,13 +271,42 @@ right-clicked and switched back on.
 />
 ```
 
+`onRowDisabledChange(row, disabled)` is the handler for every change: the gutter
+button, the context menu, `engine.setRowDisabled`, and once per row a bulk
+`engine.enableAllRows()` switches back on — top to bottom. It does *not* fire for
+the `group.disabled` seed, which is your own state arriving rather than a change
+to report back, so persist from the handler and seed from what you persisted.
+
 From the engine: `engine.setRowDisabled(id, true)`, `engine.toggleRowDisabled(id)`,
-`engine.isRowDisabled(id)`, `engine.enableAllRows()`, and the `row:disable` event.
+`engine.isRowDisabled(id)`, `engine.setDisabledRows(ids)` (switch off exactly
+these, on everything else), `engine.enableAllRows()`, and the `row:disable`
+event, which is what the prop is wired to.
 `showRowEnableToggle={false}` drops the button without giving up the API.
 
+Whether a disabled row blocks interaction at all is yours to set:
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  groups={groups}
+  // 'block' (default) — the row ignores input.
+  // 'interactive'     — the row is only faded; every gesture works on it.
+  options={{ interaction: { disabledRows: 'interactive' } }}
+  // Your own rule, with the row and the task to hand.
+  onTaskClick={(task) => (isClosed(task.groupId) ? warn() : open(task))}
+/>
+```
+
+Use `'interactive'` when "disabled" is your app's concept — a closed sprint, an
+inactive resource — and the chart is only asked to *show* it. It is chart-wide;
+a chart that needs a mix keeps `'interactive'` and filters in its own handlers.
+Switching back to `'block'` drops any selection, hover or gesture then sitting on
+a disabled row, exactly as disabling one does.
+
 The rule is about *input*, not data: `selection.set`, `applyChanges` and every
-other explicit call still reach a disabled row. Custom item renderers get
-`state.disabled` to draw it their own way, and `renderRow` gets `row.disabled`.
+other explicit call still reach a disabled row, whichever mode is set. Custom
+item renderers get `state.disabled` (the state, for the look) and `state.inert`
+(does it refuse input, for affordances); `renderRow` gets both off `row`.
 
 ## PNG export
 

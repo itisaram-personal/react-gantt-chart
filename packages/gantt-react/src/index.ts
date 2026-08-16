@@ -56,6 +56,7 @@ export type {
   GanttPlugin,
   GanttRow,
   GanttTask,
+  GanttTimeMarker,
   TaskChange,
   ViewportState,
 } from '@gantt-chart/core';

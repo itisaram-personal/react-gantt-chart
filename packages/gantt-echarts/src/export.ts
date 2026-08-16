@@ -35,6 +35,7 @@ import {
   type GanttEngineOptions,
   type GanttState,
   type GanttTheme,
+  type GanttTimeMarker,
   type ViewportState,
   type VisibleWindow,
 } from "@gantt-chart/core";
@@ -100,8 +101,8 @@ export interface GanttExportInput<T = unknown, G = unknown> extends GanttExportO
   itemRenderer?: GanttItemRenderer<T, G>;
   locale?: string;
   weekStartsOn?: 0 | 1;
-  /** Epoch ms for the "now" marker. `null` hides it; omit for the clock. */
-  now?: number | null;
+  /** Vertical time markers, drawn in the image exactly as they are on screen. */
+  markers?: readonly GanttTimeMarker[];
   /** Last chance to adjust the plot option before it is rendered. */
   transformOption?: (option: GanttOption) => GanttOption;
 }
@@ -293,7 +294,7 @@ export function planGanttExport<T, G>(input: GanttExportInput<T, G>): GanttExpor
     ticks: header.scale,
     locale: input.locale,
     weekStartsOn: input.weekStartsOn,
-    now: input.now === undefined ? Date.now() : input.now,
+    markers: input.markers,
     showGrid: input.showGrid,
     showRowBands: input.showRowBands,
     // A capture is read back the instant the option lands, so the frame has to

@@ -40,7 +40,14 @@ export interface GanttThemeColors {
   dragPreviewStroke: string;
   marqueeFill: string;
   marqueeStroke: string;
+  /**
+   * Conventional colour for a *today* {@link GanttTimeMarker}, which the chart
+   * no longer draws on its own — pass one and colour it with this to get the
+   * familiar red line.
+   */
   todayLine: string;
+  /** Default colour for every other {@link GanttTimeMarker}; each may override it. */
+  markerLine: string;
   dependencyLine: string;
   scrollbarThumb: string;
   scrollbarTrack: string;

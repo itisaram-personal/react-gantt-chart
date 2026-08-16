@@ -5,6 +5,7 @@ import {
   type GanttEngine,
   type GanttId,
   type GanttRow,
+  type GanttTimeMarker,
   type TaskChange,
   type GanttEngineOptions,
   type DeepPartial,
@@ -13,6 +14,8 @@ import {
 import { defaultItemRenderer, type GanttItemRenderer } from "@gantt-chart/echarts";
 import {
   GanttChart,
+  darkTheme,
+  lightTheme,
   type GanttDragEndEvent,
   type GanttExportApi,
   type GanttExportScope,
@@ -142,7 +145,10 @@ export function App(): JSX.Element {
   const [showDependencies, setShowDependencies] = useState(true);
   const [colorByStatus, setColorByStatus] = useState(true);
   const [enableSelection, setEnableSelection] = useState(true);
+  /** Do the faded rows refuse input, or are they only marked? */
+  const [blockDisabledRows, setBlockDisabledRows] = useState(true);
   const [marqueeSelection, setMarqueeSelection] = useState(false);
+  const [showMarkers, setShowMarkers] = useState(true);
   const [selection, setSelection] = useState<GanttId[]>([]);
 
   const dataset = useMemo(
@@ -166,8 +172,9 @@ export function App(): JSX.Element {
    * list the engine would synthesize on its own if `groups` were omitted, spelled
    * out here so that every {@link DISABLE_EVERY}th row can carry
    * `disabled: true`. Such a row keeps its bars — faded, still exported, still hit
-   * by "Fit" and the zoom bars — but ignores every interaction with them: no
-   * hover, click, marquee, drag, or drop onto it.
+   * by "Fit" and the zoom bars — and ignores every interaction with them: no
+   * hover, click, marquee, drag, or drop onto it. That last part is the
+   * "Block off rows" toggle (`interaction.disabledRows`), not the state itself.
    *
    * `disabled` only *seeds* the state, and only for groups the engine has not seen
    * before, so the gutter's power button and "Enable rows" win from then on — and
@@ -285,9 +292,8 @@ export function App(): JSX.Element {
    * right-click menu since.
    *
    * Counted from the rows rather than accumulated. `onRowDisabledChange` fires
-   * once per row a *user* toggles — never for the seed, and not for
-   * `enableAllRows` either, which clears the lot in one go — so a running total
-   * would start wrong and drift.
+   * once per row that changes — a toggle, or each row `enableAllRows` switches
+   * back on — but never for the seed, so a running total would start wrong.
    *
    * The total is not `groups.length`: with the nested y axis a collapsed team
    * takes its projects out of the list, so only the layout knows how many rows
@@ -305,12 +311,37 @@ export function App(): JSX.Element {
     countRows();
   }, [countRows, groups]);
 
+  /**
+   * A handful of vertical lines, dated against midnight today so they sit in the
+   * generated data's range.
+   *
+   * The red "now" line is one of them rather than a prop of its own: the chart
+   * draws no today line by itself, which is what lets this one be styled,
+   * labelled and moved like any other marker — an app that wants it to track the
+   * clock re-dates it on whatever interval suits it.
+   *
+   * Memoized on the theme alone: a fresh array every render would re-render the
+   * plot for markers that never moved.
+   */
+  const markers = useMemo<GanttTimeMarker[]>(() => {
+    const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+    const palette = dark ? darkTheme : lightTheme;
+    return [
+      { id: "kickoff", time: today - 60 * DAY, label: "Kick-off", color: "#0ea5e9" },
+      { id: "freeze", time: today - 7 * DAY, label: "Code freeze", dashed: true },
+      { id: "today", time: Date.now(), label: "Now", color: palette.colors.todayLine },
+      { id: "release", time: today + 21 * DAY, label: "Release 2.0", color: "#16a34a" },
+    ];
+  }, [dark]);
+
   const options: DeepPartial<GanttEngineOptions> = useMemo(
     () => ({
       metrics: { uniformRowHeight: uniformRows },
       stacking: { enabled: stacking, rollupCollapsed: rollup, maxLanes },
       interaction: {
         snapMs,
+        // The fade is the state; this is what it costs the row.
+        disabledRows: blockDisabledRows ? "block" : "interactive",
         // Ctrl is the band in *add* mode, so a ctrl-drag extends the selection
         // from anywhere in the plot — empty space, a bar, even a bar already
         // selected. Mapping it to `pan` is what stops that, since a modifier
@@ -318,7 +349,7 @@ export function App(): JSX.Element {
         backgroundDrag: { alt: "pan", plain: "pan", ctrl: "marquee", shift: "marquee" },
       },
     }),
-    [stacking, uniformRows, rollup, maxLanes, snapMs],
+    [stacking, uniformRows, rollup, maxLanes, snapMs, blockDisabledRows],
   );
 
   /** Colour by status instead of by group — the same hook a consumer would use. */
@@ -646,7 +677,10 @@ export function App(): JSX.Element {
           </select>
         </label>
 
-        <label className="app__field" title="How long the pointer must rest on a bar before its tooltip opens">
+        <label
+          className="app__field"
+          title="How long the pointer must rest on a bar before its tooltip opens"
+        >
           Tooltip delay
           <select
             value={tooltipDelay}
@@ -687,6 +721,18 @@ export function App(): JSX.Element {
           checked={marqueeSelection}
           onChange={setMarqueeSelection}
           title="Drag a box anywhere — background or bar — to select; trades away drag-to-move"
+        />
+        <Toggle
+          label="Markers"
+          checked={showMarkers}
+          onChange={setShowMarkers}
+          title="Vertical lines at fixed dates — kick-off, code freeze, today, release"
+        />
+        <Toggle
+          label="Block off rows"
+          checked={blockDisabledRows}
+          onChange={setBlockDisabledRows}
+          title="Off: a disabled row is only faded, and every gesture works on it as usual"
         />
 
         <TimeRangePicker engine={engine} />
@@ -784,6 +830,7 @@ export function App(): JSX.Element {
           onTasksChange={applyAndRecord}
           onDragEnd={describeDrop}
           onSelectionChange={setSelection}
+          markers={showMarkers ? markers : undefined}
           onRowDisabledChange={countRows}
           onRowToggle={countRows}
           rowMenuItems={rowMenuItems}
@@ -825,7 +872,7 @@ export function App(): JSX.Element {
           drag <em>selected</em> bars to move them · drag edges to resize · drag anything else to
           pan · ctrl+drag extends the selection · shift+drag marquees · wheel scrolls · ctrl+wheel
           zooms · right-click for menu · hover a row label for ⋯ and the power button · faded rows
-          are disabled and ignore input
+          are disabled, and ignore input unless "Block off rows" is off
         </span>
       </footer>
     </div>

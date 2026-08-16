@@ -10,8 +10,10 @@ export interface AxisRowDescriptor<G = unknown> {
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
-  /** Mirrors {@link GanttRow.disabled}: the row's bars ignore input. */
+  /** Mirrors {@link GanttRow.disabled}: the row is switched off. */
   disabled: boolean;
+  /** Mirrors {@link GanttRow.inert}: the row is switched off *and* ignores input. */
+  inert: boolean;
   label: string;
   /** Alternating band index, stable under scrolling. */
   odd: boolean;
@@ -43,6 +45,7 @@ export function computeAxisRows<G>(
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
       disabled: row.disabled,
+      inert: row.inert,
       label: row.group.label ?? String(row.group.id),
       odd: row.index % 2 === 1,
       fullyVisible: y >= 0 && y + row.height <= viewport.height,
@@ -58,8 +61,10 @@ export interface RowBand<G = unknown> {
   height: number;
   odd: boolean;
   hovered: boolean;
-  /** Mirrors {@link GanttRow.disabled}: the row's bars ignore input. */
+  /** Mirrors {@link GanttRow.disabled}: the row is switched off. */
   disabled: boolean;
+  /** Mirrors {@link GanttRow.inert}: the row is switched off *and* ignores input. */
+  inert: boolean;
 }
 
 export function computeRowBands<G>(
@@ -75,9 +80,12 @@ export function computeRowBands<G>(
       y: row.y - viewport.scrollTop,
       height: row.height,
       odd: row.index % 2 === 1,
-      // A disabled row is never the hover target, whatever the pointer is over.
-      hovered: hoveredRowIndex === row.index && !row.disabled,
+      // An inert row is never the hover target, whatever the pointer is over —
+      // the band would offer input the row will not honour. A disabled row that
+      // still takes input keeps its highlight.
+      hovered: hoveredRowIndex === row.index && !row.inert,
       disabled: row.disabled,
+      inert: row.inert,
     });
   }
   return out;

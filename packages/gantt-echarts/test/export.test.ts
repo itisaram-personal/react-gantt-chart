@@ -118,7 +118,7 @@ describe("resolveExportFrame", () => {
 describe("planGanttExport", () => {
   it("builds a one-pass plot option on the export background", () => {
     const { engine, theme } = fixture();
-    const plan = planGanttExport({ engine, theme, echarts, now: null });
+    const plan = planGanttExport({ engine, theme, echarts });
 
     expect(seriesIds(plan.option)).toEqual(["gantt-background", "gantt-items"]);
     expect(plan.option.backgroundColor).toBe(theme.colors.background);
@@ -138,7 +138,7 @@ describe("planGanttExport", () => {
     const { engine, theme, tasks } = fixture({ groups: 40, tasksPerGroup: 2, height: 400 });
     expect(engine.getVisible().items.length).toBeLessThan(tasks.length);
 
-    const plan = planGanttExport({ engine, theme, echarts, scope: "full", now: null });
+    const plan = planGanttExport({ engine, theme, echarts, scope: "full" });
 
     expect(plan.window.items).toHaveLength(tasks.length);
     expect(plan.rows).toHaveLength(engine.getLayout().rows.length);
@@ -162,7 +162,7 @@ describe("planGanttExport", () => {
     engine.setHovered(tasks[1].id, 0);
     engine.store.setState({ marquee: { x: 10, y: 10, width: 100, height: 50 } });
 
-    const plan = planGanttExport({ engine, theme, echarts, now: null });
+    const plan = planGanttExport({ engine, theme, echarts });
 
     // No marquee rectangle, no drag ghost.
     expect(seriesIds(plan.option)).not.toContain("gantt-interaction");
@@ -194,7 +194,7 @@ describe("planGanttExport", () => {
 
   it("draws the grid from the same ticks the header labels", () => {
     const { engine, theme } = fixture();
-    const plan = planGanttExport({ engine, theme, echarts, now: null });
+    const plan = planGanttExport({ engine, theme, echarts });
 
     const lines = ofType(renderSeries(plan.option, "gantt-background"), "line");
     const vertical = lines.filter((line) => {
@@ -218,7 +218,7 @@ describe("planGanttExport", () => {
       dependenciesPlugin({ theme, dependencies: [{ from: tasks[0].id, to: tasks[1].id }] }),
     );
 
-    const plan = planGanttExport({ engine, theme, echarts, scope: "full", width: 1000, now: null });
+    const plan = planGanttExport({ engine, theme, echarts, scope: "full", width: 1000 });
     const polylines = ofType(renderSeries(plan.option, "gantt-overlay"), "polyline");
     expect(polylines).toHaveLength(1);
 

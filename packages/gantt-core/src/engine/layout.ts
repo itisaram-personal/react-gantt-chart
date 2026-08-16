@@ -300,7 +300,12 @@ export function rowIndexAt<G>(layout: LayoutResult<G>, contentY: number): number
   return index < 0 ? -1 : index;
 }
 
-/** Is `rowIndex` a disabled row? Out-of-range indices count as enabled. */
+/**
+ * Is `rowIndex` a disabled row? Out-of-range indices count as enabled.
+ *
+ * The *state*, which is what a view layer styles from. Whether input is
+ * actually refused is {@link isRowInert}.
+ */
 export function isRowDisabled<G>(layout: LayoutResult<G>, rowIndex: number): boolean {
   return rowIndex >= 0 && rowIndex < layout.rows.length && layout.rows[rowIndex].disabled;
 }
@@ -308,11 +313,30 @@ export function isRowDisabled<G>(layout: LayoutResult<G>, rowIndex: number): boo
 /**
  * Does the task at `taskIndex` sit on a disabled row?
  *
- * The single question every interaction engine asks before acting on a task,
- * so it stays one lookup rather than a per-engine reimplementation.
+ * The state again — see {@link isTaskRowInert} for the one interactions ask.
  */
 export function isTaskRowDisabled<G>(layout: LayoutResult<G>, taskIndex: number): boolean {
   return isRowDisabled(layout, layout.taskRow[taskIndex]);
+}
+
+/**
+ * Does `rowIndex` refuse input? Out-of-range indices count as reachable.
+ *
+ * Disabled *and* blocking, per `interaction.disabledRows` — see
+ * {@link GanttRow.inert}.
+ */
+export function isRowInert<G>(layout: LayoutResult<G>, rowIndex: number): boolean {
+  return rowIndex >= 0 && rowIndex < layout.rows.length && layout.rows[rowIndex].inert;
+}
+
+/**
+ * Does the task at `taskIndex` sit on a row that refuses input?
+ *
+ * The single question every interaction engine asks before acting on a task,
+ * so it stays one lookup rather than a per-engine reimplementation.
+ */
+export function isTaskRowInert<G>(layout: LayoutResult<G>, taskIndex: number): boolean {
+  return isRowInert(layout, layout.taskRow[taskIndex]);
 }
 
 /** Nearest row to a content-space y coordinate, clamped to the content bounds. */

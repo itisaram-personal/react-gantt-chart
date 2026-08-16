@@ -25,6 +25,8 @@ export {
   nearestRowIndex,
   isRowDisabled,
   isTaskRowDisabled,
+  isRowInert,
+  isTaskRowInert,
 } from './engine/layout';
 export { computeVisible, queryRect } from './engine/virtualize';
 export type { VirtualizeInput } from './engine/virtualize';

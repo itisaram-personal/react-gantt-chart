@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { CustomChart } from 'echarts/charts';
 import { init, use } from 'echarts/core';
 import { CanvasRenderer, SVGRenderer } from 'echarts/renderers';
-import type { GanttEngine, GanttTheme } from '@gantt-chart/core';
+import type { GanttEngine, GanttTheme, GanttTimeMarker } from '@gantt-chart/core';
 import {
   GanttEChartsAdapter,
   type EChartsLike,
@@ -18,8 +18,8 @@ export interface GanttPlotProps<T, G> {
   engine: GanttEngine<T, G>;
   theme: GanttTheme;
   itemRenderer?: GanttItemRenderer<T, G>;
-  /** `null` hides the marker; `undefined` follows the clock. */
-  now?: number | null;
+  /** Vertical lines at fixed instants, drawn the full height of the plot. */
+  markers?: readonly GanttTimeMarker[];
   locale?: string;
   weekStartsOn?: 0 | 1;
   renderer?: 'canvas' | 'svg';
@@ -62,7 +62,7 @@ export function GanttPlot<T, G>(props: GanttPlotProps<T, G>): JSX.Element {
     const adapter = new GanttEChartsAdapter<T, G>(engine, {
       theme: latest.current.theme,
       itemRenderer: latest.current.itemRenderer,
-      now: () => (latest.current.now === undefined ? Date.now() : latest.current.now),
+      markers: latest.current.markers,
       locale: latest.current.locale,
       weekStartsOn: latest.current.weekStartsOn,
       showGrid: latest.current.showGrid,
@@ -92,13 +92,21 @@ export function GanttPlot<T, G>(props: GanttPlotProps<T, G>): JSX.Element {
     adapterRef.current?.setOptions({
       theme: props.theme,
       itemRenderer: props.itemRenderer,
-      now: () => (latest.current.now === undefined ? Date.now() : latest.current.now),
+      markers: props.markers,
       locale: props.locale,
       weekStartsOn: props.weekStartsOn,
       showGrid: props.showGrid,
       showRowBands: props.showRowBands,
     });
-  }, [props.theme, props.itemRenderer, props.now, props.locale, props.weekStartsOn, props.showGrid, props.showRowBands]);
+  }, [
+    props.theme,
+    props.itemRenderer,
+    props.markers,
+    props.locale,
+    props.weekStartsOn,
+    props.showGrid,
+    props.showRowBands,
+  ]);
 
   return (
     <div

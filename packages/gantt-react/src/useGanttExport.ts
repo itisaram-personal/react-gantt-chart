@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { CustomChart } from "echarts/charts";
 import { init, use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import type { GanttEngine, GanttTheme } from "@gantt-chart/core";
+import type { GanttEngine, GanttTheme, GanttTimeMarker } from "@gantt-chart/core";
 import {
   downloadGanttPng,
   ganttToPngBlob,
@@ -32,8 +32,8 @@ export interface UseGanttExportInput<T = unknown, G = unknown> {
   itemRenderer?: GanttItemRenderer<T, G>;
   locale?: string;
   weekStartsOn?: 0 | 1;
-  /** Epoch ms for the "now" marker. `null` hides it; omit for the clock. */
-  now?: number | null;
+  /** Vertical time markers, so an image carries the same lines the plot does. */
+  markers?: readonly GanttTimeMarker[];
   /** Applied to every call, and overridable per call. */
   defaults?: GanttExportOptions;
 }
@@ -82,7 +82,7 @@ export function useGanttExport<T = unknown, G = unknown>(
         itemRenderer: current.itemRenderer,
         locale: current.locale,
         weekStartsOn: current.weekStartsOn,
-        now: current.now,
+        markers: current.markers,
         ...current.defaults,
         ...options,
       };

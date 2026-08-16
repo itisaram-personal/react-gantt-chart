@@ -30,6 +30,7 @@ export const darkTheme: GanttTheme = {
     marqueeFill: 'rgba(122, 162, 247, 0.16)',
     marqueeStroke: '#7aa2f7',
     todayLine: '#f87171',
+    markerLine: '#a78bfa',
     dependencyLine: '#64748b',
     scrollbarThumb: '#39435c',
     scrollbarTrack: '#161d2c',

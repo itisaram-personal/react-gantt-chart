@@ -38,13 +38,50 @@ export interface GanttGroup<G = unknown> {
   collapsed?: boolean;
   /**
    * Initial disabled state; runtime state lives in the store, exactly like
-   * {@link GanttGroup.collapsed}. See {@link GanttRow.disabled} for what a
-   * disabled row ignores.
+   * {@link GanttGroup.collapsed}. What a disabled row *does* with input is the
+   * chart's decision, not the row's — see
+   * {@link InteractionOptions.disabledRows}.
    */
   disabled?: boolean;
   /** Fixed row height in px. Overrides the lane-derived height. */
   height?: number;
   data?: G;
+}
+
+/* ------------------------------------------------------------------ *
+ * Time markers
+ * ------------------------------------------------------------------ */
+
+/**
+ * A vertical line at an instant in time, drawn the full height of the plot.
+ *
+ * A "today" line is one of these rather than a feature of its own: an entry at
+ * `Date.now()`, conventionally coloured `theme.colors.todayLine`, refreshed on
+ * whatever cadence the app wants the line to move at.
+ *
+ * Chrome rather than data: markers are not tasks, take no part in layout,
+ * stacking or hit-testing, and never take pointer input. Ones outside the
+ * visible window cost nothing but the comparison that skips them.
+ */
+export interface GanttTimeMarker {
+  /** Your own identity for the marker. Not required to draw one. */
+  id?: GanttId;
+  /** Where the line goes, epoch ms. */
+  time: number;
+  /**
+   * Drawn as a chip at the top of the line. Omit for a bare line.
+   *
+   * Chips are placed left to right and one that would collide with the previous
+   * one is dropped — a cluster of markers stays readable as lines rather than
+   * turning its labels into mush.
+   */
+  label?: string;
+  /** Line and chip colour. Defaults to the theme's `markerLine`. */
+  color?: string;
+  /** Line width in px. Defaults to 1.5. */
+  lineWidth?: number;
+  /** Draw the line dashed rather than solid. */
+  dashed?: boolean;
 }
 
 /* ------------------------------------------------------------------ *
@@ -99,23 +136,37 @@ export interface GanttRow<G = unknown> {
   hasChildren: boolean;
   collapsed: boolean;
   /**
-   * The row is inert: its bars ignore every data interaction — selection,
-   * click and double-click events, drag, resize and marquee — and no drag may
+   * The row is switched off. Its bars are faded and its label is muted, and —
+   * unless {@link InteractionOptions.disabledRows} says otherwise — it ignores
+   * input; see {@link GanttRow.inert}.
+   *
+   * This is the state, never the policy: it reports what the row *is*, so a
+   * view layer can render a disabled row as disabled whatever the chart lets
+   * the pointer do with it.
+   *
+   * Unlike {@link GanttRow.collapsed} it changes nothing about geometry, so
+   * toggling it never re-runs stacking or layout.
+   */
+  disabled: boolean;
+  /**
+   * The row ignores input: `disabled` *and*
+   * {@link InteractionOptions.disabledRows} set to `'block'` (the default).
+   *
+   * This is the question every interaction asks — the one flag that decides
+   * whether a gesture may act on the row. An inert row's bars ignore selection,
+   * click and double-click events, drag, resize and marquee, and no drag may
    * drop a task onto it.
    *
    * Read-only affordances are not interactions and stay: the bars still hover,
    * which is what keeps their tooltip, though they wear no hover emphasis and
    * offer no cursor, since neither would lead anywhere.
    *
-   * View-level controls keep working, so a disabled row can still be
-   * collapsed, right-clicked and re-enabled. Programmatic APIs
-   * (`selection.set`, `applyChanges`, …) are not gated either: this is an
-   * input rule, not a data lock.
-   *
-   * Unlike {@link GanttRow.collapsed} it changes nothing about geometry, so
-   * toggling it never re-runs stacking or layout.
+   * View-level controls keep working, so an inert row can still be collapsed,
+   * right-clicked and re-enabled. Programmatic APIs (`selection.set`,
+   * `applyChanges`, …) are not gated either: this is an input rule, not a data
+   * lock.
    */
-  disabled: boolean;
+  inert: boolean;
 }
 
 /* ------------------------------------------------------------------ *
@@ -207,6 +258,9 @@ export type WheelAction = "scroll" | "zoom" | "pan" | "none";
 /** What a left-button drag starting on empty plot background does. */
 export type BackgroundDragAction = "marquee" | "pan" | "none";
 
+/** What a disabled row does with input. See {@link InteractionOptions.disabledRows}. */
+export type DisabledRowBehavior = "block" | "interactive";
+
 export interface InteractionOptions {
   selection: boolean;
   /** Allow multi-select via ctrl/meta and shift. */
@@ -258,6 +312,28 @@ export interface InteractionOptions {
    * filtered by this.
    */
   dragSelectedOnly: boolean;
+  /**
+   * What a disabled row does with input — the behaviour side of
+   * {@link GanttGroup.disabled}, which only ever sets the state.
+   *
+   * `'block'` (the default) makes the row inert: its bars ignore selection,
+   * clicks, drag, resize and marquee, no drag may drop onto it, and the
+   * affordances that would promise otherwise — hover emphasis, the grab cursor
+   * — stay off. Selection, hover and any gesture already on the row are dropped
+   * the moment it is disabled.
+   *
+   * `'interactive'` makes it a purely visual state: the row is still faded and
+   * still reports `disabled`, but every gesture works on it exactly as it does
+   * on any other row. Use it when "disabled" is the consumer's own concept — a
+   * closed sprint, an inactive resource — and the chart is only asked to *show*
+   * it, with the app deciding what may still be done to it (from `task:click`,
+   * `onDragEnd`, and the row's own `disabled` flag).
+   *
+   * Chart-wide, like every other interaction switch. A chart that needs a mix
+   * keeps `'interactive'` here and filters in its own handlers, where it has the
+   * row and the task to hand.
+   */
+  disabledRows: DisabledRowBehavior;
   /**
    * Gesture for a left-button drag on empty background, keyed by modifier.
    *

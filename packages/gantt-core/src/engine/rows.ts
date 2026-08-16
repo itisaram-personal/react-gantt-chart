@@ -18,15 +18,16 @@ export interface RowModel<G = unknown> {
  *
  * Iterative DFS: a 100 000-node group tree would blow the call stack.
  *
- * `disabled` only stamps {@link GanttRow.disabled} — it changes neither which
- * rows exist nor their order, which is why the engine can refresh it with
- * {@link applyDisabled} instead of rebuilding the model.
+ * `disabled` only stamps {@link GanttRow.disabled} / {@link GanttRow.inert} —
+ * it changes neither which rows exist nor their order, which is why the engine
+ * can refresh it with {@link applyDisabled} instead of rebuilding the model.
  */
 export function resolveRows<T, G>(
   model: DataModel<T, G>,
   collapsed: ReadonlySet<GanttId>,
   rollupCollapsed: boolean,
   disabled?: ReadonlySet<GanttId>,
+  blockInput = true,
 ): RowModel<G> {
   const groupCount = model.groups.length;
   const groupToRow = new Int32Array(groupCount).fill(-1);
@@ -53,6 +54,7 @@ export function resolveRows<T, G>(
     let ownRow = -1;
     if (!hidden) {
       ownRow = rows.length;
+      const isDisabled = disabled ? disabled.has(group.id) : false;
       rows.push({
         index: ownRow,
         group,
@@ -65,7 +67,8 @@ export function resolveRows<T, G>(
         laneOffset: 0,
         hasChildren,
         collapsed: isCollapsed,
-        disabled: disabled ? disabled.has(group.id) : false,
+        disabled: isDisabled,
+        inert: isDisabled && blockInput,
       });
       groupToRow[groupIndex] = ownRow;
     } else {
@@ -85,18 +88,26 @@ export function resolveRows<T, G>(
 }
 
 /**
- * Re-stamps {@link GanttRow.disabled} on an existing row model.
+ * Re-stamps {@link GanttRow.disabled} and {@link GanttRow.inert} on an existing
+ * row model.
  *
  * Disabling a row changes no geometry, so paying for a rebuild of the rows —
  * and with it the stacking and layout passes hanging off them — would be pure
  * waste. The rows are updated in place instead, which also refreshes any frame
- * still holding them.
+ * still holding them. Switching `blockInput` (the `interaction.disabledRows`
+ * option) is the same kind of change, and rides along here for the same reason.
  */
-export function applyDisabled<G>(rows: readonly GanttRow<G>[], disabled: ReadonlySet<GanttId>): void {
+export function applyDisabled<G>(
+  rows: readonly GanttRow<G>[],
+  disabled: ReadonlySet<GanttId>,
+  blockInput = true,
+): void {
   const empty = disabled.size === 0;
   for (let i = 0; i < rows.length; i++) {
     // Written unconditionally: rows arrive from a cache that may have been
     // stamped with a different set.
-    rows[i].disabled = empty ? false : disabled.has(rows[i].group.id);
+    const isDisabled = empty ? false : disabled.has(rows[i].group.id);
+    rows[i].disabled = isDisabled;
+    rows[i].inert = isDisabled && blockInput;
   }
 }

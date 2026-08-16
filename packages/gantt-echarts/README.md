@@ -20,10 +20,11 @@ at — batching, diffing and painting thousands of elements — and nothing else
   because the engine can already answer "what is under this pixel" in
   microseconds — which is what makes drag, resize and marquee feel native.
 
-Four series are emitted, in paint order: `gantt-background` (row bands, grid
-lines, the now marker), `gantt-items` (one datum per visible bar),
-`gantt-overlay` (plugin layers) and `gantt-interaction` (marquee, drag ghost). The
-last two only appear on frames that need them.
+Five series are emitted, in paint order: `gantt-background` (row bands, grid
+lines, marker lines), `gantt-items` (one datum per visible bar),
+`gantt-marker-labels` (the chips naming the markers, above the bars where they
+can be read), `gantt-overlay` (plugin layers) and `gantt-interaction` (marquee,
+drag ghost). All but the first two only appear on frames that need them.
 
 ## Attaching to a chart
 
@@ -104,7 +105,10 @@ const adapter = new GanttEChartsAdapter(engine, {
 
 Returning `null` skips a bar. `state` also carries `disabled` — true when the
 bar's row has been switched off, which the default renderer draws as a faded bar
-and the adapter enforces by ignoring pointer input over that row.
+— and `inert`, true when that row also refuses input (`interaction.disabledRows`,
+`'block'` by default), which is what the adapter enforces by ignoring pointer
+input over the row and the default renderer honours by dropping the hover stroke.
+Draw the look off `disabled`; draw affordances off `inert`.
 
 ## Time scale
 

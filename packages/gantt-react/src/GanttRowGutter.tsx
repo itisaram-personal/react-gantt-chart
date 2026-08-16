@@ -24,8 +24,8 @@ export interface GanttRowGutterProps<T, G> {
   showRowMenu?: boolean;
   /**
    * Show the per-row enable/disable button, drawn straight after the label. A
-   * disabled row keeps its bars on screen but ignores every interaction with
-   * them — see {@link GanttRow.disabled}. Default true.
+   * disabled row keeps its bars on screen, faded; whether it also ignores
+   * interaction is `options.interaction.disabledRows`. Default true.
    */
   showRowEnableToggle?: boolean;
   /**
@@ -95,7 +95,7 @@ export function GanttRowGutter<T, G>({
           className={[
             'gantt-gutter__row',
             row.odd ? 'is-odd' : 'is-even',
-            hoveredRowIndex === row.row.index && !row.disabled ? 'is-hovered' : '',
+            hoveredRowIndex === row.row.index && !row.inert ? 'is-hovered' : '',
             row.disabled ? 'is-disabled' : '',
           ]
             .filter(Boolean)
@@ -103,7 +103,7 @@ export function GanttRowGutter<T, G>({
           style={{ top: row.y, height: row.height }}
           onPointerEnter={() => engine.setHovered(null, row.row.index)}
           onDoubleClick={() => {
-            if (row.disabled) return;
+            if (row.inert) return;
             engine.events.emit('row:dblclick', { row: row.row, position: { x: 0, y: row.y } });
           }}
           onContextMenu={(event) => {
@@ -184,7 +184,9 @@ function RowEnableButton<T, G>({
       className={`gantt-gutter__power${off ? ' is-off' : ''}`}
       aria-label={off ? `Enable ${row.label}` : `Disable ${row.label}`}
       aria-pressed={!off}
-      title={off ? 'Row disabled — interactions ignored' : 'Disable row'}
+      // What "off" costs the row depends on `interaction.disabledRows`, so the
+      // tip only promises the part that is always true.
+      title={off ? (row.inert ? 'Row disabled — interactions ignored' : 'Row disabled') : 'Disable row'}
       onClick={(event) => {
         event.stopPropagation();
         engine.toggleRowDisabled(row.row.group.id);

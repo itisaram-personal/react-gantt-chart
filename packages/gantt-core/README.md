@@ -84,20 +84,45 @@ instant do not share a lane.
 
 ## Disabled rows
 
-`engine.setRowDisabled(groupId, true)` makes a row inert: its tasks are skipped
-by click semantics, ranges, marquee, select-all/invert and keyboard focus, no
-drag can begin on them or drop onto the row, and the row stops being a hover
-target. `group.disabled` seeds the state the way `group.collapsed` does, and
-`row:disable` reports every change.
+`engine.setRowDisabled(groupId, true)` switches a row off: its bars fade and its
+label mutes. `toggleRowDisabled`, `setDisabledRows(ids)` (off for exactly these,
+on for everything else) and `enableAllRows()` are the rest of the API, and
+`group.disabled` seeds the state the way `group.collapsed` does.
 
-It is an *input* rule. `selection.set`, `applyChanges` and every other explicit
-call still reach the row, and `hitTest` stays truthful about what is under a
-pixel — `result.row.disabled` is what tells a caller the hit is out of bounds.
+`row:disable` fires once per row that actually changed, in row order, whichever
+of those calls did it — a bulk enable reports each row it switched on rather than
+leaving a listener to diff the set. Setting a row to the state it already has
+says nothing, and neither does the `group.disabled` seed: that is the data
+speaking, not a change to report back to it.
 
-Because it changes no geometry, disabling sits outside the layout inputs: the
-row model and everything downstream of it are kept, and only `GanttRow.disabled`
-is re-stamped. Toggling a row in a 100 000-task chart therefore costs a walk of
-the row list, not a re-stack.
+What that costs the row is `interaction.disabledRows`, and it is the chart's
+decision rather than the row's:
+
+| | `'block'` (default) | `'interactive'` |
+| --- | --- | --- |
+| `row.disabled` | true | true |
+| `row.inert` | true | false |
+| click, range, marquee, select-all/invert, keyboard focus | skipped | normal |
+| drag from it / drop onto it | refused | normal |
+| hover emphasis, cursor | withheld | offered |
+| selection, hover and gestures held when it goes inert | dropped | kept |
+
+`row.disabled` is the *state* — style from it. `row.inert` is `disabled` **and**
+`'block'` — gate from it, via `isRowInert` / `isTaskRowInert`, which is what
+every interaction engine here asks. `'interactive'` is for charts where disabled
+is the consumer's own concept and only wants showing; the app then decides in its
+own handlers what may still be done to the row.
+
+Either way it is an *input* rule, never a data lock: `selection.set`,
+`applyChanges` and every other explicit call still reach the row, and `hitTest`
+stays truthful about what is under a pixel — `result.row.inert` is what tells a
+caller the hit is out of bounds.
+
+Because none of it changes geometry, disabling sits outside the layout inputs:
+the row model and everything downstream of it are kept, and only
+`GanttRow.disabled` / `GanttRow.inert` are re-stamped — switching the option at
+runtime included. Toggling a row in a 100 000-task chart therefore costs a walk
+of the row list, not a re-stack.
 
 ## Hit testing
 

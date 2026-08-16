@@ -30,6 +30,7 @@ export const lightTheme: GanttTheme = {
     marqueeFill: 'rgba(59, 111, 224, 0.12)',
     marqueeStroke: '#3b6fe0',
     todayLine: '#dc2626',
+    markerLine: '#7c3aed',
     dependencyLine: '#94a3b8',
     scrollbarThumb: '#c3ccd8',
     scrollbarTrack: '#f1f5f9',

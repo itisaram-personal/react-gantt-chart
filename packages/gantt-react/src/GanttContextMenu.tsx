@@ -256,9 +256,10 @@ function defaultRowItems<T, G>(row: GanttRow<G>, engine: GanttEngine<T, G>): Gan
     {
       id: 'select-row',
       label: empty ? 'Select tasks in row' : `Select ${indices.length} task${indices.length === 1 ? '' : 's'}`,
-      // Selecting into a disabled row would hand back exactly the interaction
-      // the row opted out of, and a chart with selection off has none to give.
-      disabled: empty || row.disabled || !engine.getOptions().interaction.selection,
+      // Selecting into an inert row would hand back exactly the interaction the
+      // row opted out of, and a chart with selection off has none to give. A
+      // disabled row that still takes input is offered like any other.
+      disabled: empty || row.inert || !engine.getOptions().interaction.selection,
       onSelect: () => engine.selection.set(indices.map((index) => tasks[index].id)),
     },
     {

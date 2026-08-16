@@ -102,6 +102,11 @@ export interface GanttElementStyle {
   overflow?: 'none' | 'truncate' | 'break' | 'breakAll';
   ellipsis?: string;
   lineHeight?: number;
+  /** Text elements: the box drawn behind the text. */
+  backgroundColor?: string;
+  /** Inset between that box and the text — one value, or `[top, right, bottom, left]`. */
+  padding?: number | number[];
+  borderRadius?: number;
 }
 
 /** CSS-style shorthand for a zrender `style.font`. */

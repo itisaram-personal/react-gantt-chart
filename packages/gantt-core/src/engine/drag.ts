@@ -1,7 +1,7 @@
 import { clamp } from '../util/search';
 import type { DragMode, DragState, GanttId, Point, TaskChange } from '../types';
 import type { EngineContext } from './context';
-import { isRowDisabled, isTaskRowDisabled, nearestRowIndex } from './layout';
+import { isRowInert, isTaskRowInert, nearestRowIndex } from './layout';
 import type { SelectionEngine } from './selection';
 import type { ViewportController } from './viewport';
 
@@ -67,7 +67,7 @@ export class DragEngine<T = unknown, G = unknown> {
 
   /**
    * Arm a gesture. Returns false when dragging is disabled, the task is
-   * unknown, or it sits on a disabled row. The gesture stays inactive (and
+   * unknown, or it sits on an inert row. The gesture stays inactive (and
    * renders nothing) until the pointer passes {@link DRAG_THRESHOLD_PX}.
    */
   begin(taskId: GanttId, point: Point, options: DragBeginOptions = {}): boolean {
@@ -81,7 +81,7 @@ export class DragEngine<T = unknown, G = unknown> {
     const taskIndex = model.taskIndexById.get(taskId);
     if (taskIndex === undefined) return false;
     if (model.tasks[taskIndex].draggable === false) return false;
-    if (isTaskRowDisabled(layout, taskIndex)) return false;
+    if (isTaskRowInert(layout, taskIndex)) return false;
 
     if (options.selectOnBegin !== false && !this.selection.isSelected(taskId)) {
       this.selection.handleClick(taskId);
@@ -103,7 +103,7 @@ export class DragEngine<T = unknown, G = unknown> {
         index !== undefined &&
         model.tasks[index].draggable !== false &&
         layout.taskRow[index] >= 0 &&
-        !isTaskRowDisabled(layout, index)
+        !isTaskRowInert(layout, index)
       );
     });
     if (taskIds.length === 0) return false;
@@ -224,10 +224,10 @@ export class DragEngine<T = unknown, G = unknown> {
           if (drag.mode === 'free' && drag.deltaRow !== 0) {
             const originRow = this.originRows.get(id) ?? layout.taskRow[index];
             const targetRow = clamp(originRow + drag.deltaRow, 0, layout.rows.length - 1);
-            // Belt and braces: the gesture already refuses to target a disabled
+            // Belt and braces: the gesture already refuses to target an inert
             // row, and a row disabled mid-drag cancels it. A change that would
             // still land on one keeps its group instead.
-            if (!isRowDisabled(layout, targetRow)) groupId = layout.rows[targetRow].group.id;
+            if (!isRowInert(layout, targetRow)) groupId = layout.rows[targetRow].group.id;
           }
         }
       }
@@ -246,7 +246,7 @@ export class DragEngine<T = unknown, G = unknown> {
    * Vertical delta in *rows*, derived from the row under the pointer rather
    * than from a pixel division — row heights vary with lane count.
    *
-   * A disabled row is not a drop target: the gesture holds `current` instead,
+   * An inert row is not a drop target: the gesture holds `current` instead,
    * so dragging across one glides over it rather than snapping back to the
    * origin.
    */
@@ -255,7 +255,7 @@ export class DragEngine<T = unknown, G = unknown> {
     if (layout.rows.length === 0 || this.originRowIndex < 0) return 0;
     const targetRow = nearestRowIndex(layout, this.viewport.pxToContent(pointerY));
     if (targetRow < 0) return 0;
-    if (isRowDisabled(layout, targetRow)) return current;
+    if (isRowInert(layout, targetRow)) return current;
 
     const delta = targetRow - this.originRowIndex;
     if (delta === 0) return 0;

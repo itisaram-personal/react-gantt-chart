@@ -6,7 +6,7 @@ import type { GanttElement } from '../src/elements';
 import { fixture, flatten, ofType } from './helpers';
 
 function overlayElements(engine: Parameters<typeof buildGanttOption>[0]['engine']) {
-  const option = buildGanttOption({ engine, theme: lightTheme, now: null });
+  const option = buildGanttOption({ engine, theme: lightTheme });
   const series = option.series.find((entry) => entry.id === 'gantt-overlay');
   if (!series) return [];
   return flatten(series.renderItem({ dataIndex: 0 }, null) as GanttElement);

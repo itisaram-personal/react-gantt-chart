@@ -110,7 +110,7 @@ describe('rendering through a real ECharts instance', () => {
   it('accepts the option and draws the frame', () => {
     const { engine } = fixture({ groups: 3, tasksPerGroup: 4 });
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -129,7 +129,7 @@ describe('rendering through a real ECharts instance', () => {
   it('renders bar labels as real text', () => {
     const { engine } = fixture({ groups: 2, tasksPerGroup: 2 });
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -143,7 +143,6 @@ describe('rendering through a real ECharts instance', () => {
     const chart = ssrChart();
     const adapter = new GanttEChartsAdapter(engine, {
       theme: lightTheme,
-      now: () => null,
       itemRenderer: plainBar,
       showGrid: false,
       showRowBands: false,
@@ -170,7 +169,6 @@ describe('rendering through a real ECharts instance', () => {
     const chart = ssrChart();
     const adapter = new GanttEChartsAdapter(engine, {
       theme: lightTheme,
-      now: () => null,
       itemRenderer: plainBar,
     });
     adapter.attach(chart);
@@ -195,7 +193,7 @@ describe('rendering through a real ECharts instance', () => {
   it('repaints with the new theme', () => {
     const { engine } = fixture({ groups: 2, tasksPerGroup: 2 });
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -211,7 +209,7 @@ describe('rendering through a real ECharts instance', () => {
   it('thickens the outline of a selected bar', () => {
     const { engine } = fixture({ groups: 1, tasksPerGroup: 2 });
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -224,12 +222,12 @@ describe('rendering through a real ECharts instance', () => {
     expect(svg).toContain(`stroke-width="${lightTheme.metrics.selectedStrokeWidth}"`);
   });
 
-  it('draws the now marker inside the window', () => {
+  it('draws a time marker inside the window', () => {
     const { engine } = fixture();
     const chart = ssrChart();
     const adapter = new GanttEChartsAdapter(engine, {
       theme: lightTheme,
-      now: () => T0 + 3 * DAY,
+      markers: [{ time: T0 + 3 * DAY, color: lightTheme.colors.todayLine }],
     });
     adapter.attach(chart);
     track(adapter, chart);
@@ -241,7 +239,7 @@ describe('rendering through a real ECharts instance', () => {
     const { engine } = fixture({ groups: 1, tasksPerGroup: 1 });
     engine.setData([], []);
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -253,7 +251,7 @@ describe('rendering through a real ECharts instance', () => {
   it('re-renders after a resize at the new size', () => {
     const { engine } = fixture({ groups: 2, tasksPerGroup: 2 });
     const chart = ssrChart();
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 
@@ -295,7 +293,6 @@ describe('rendering through a real ECharts instance', () => {
     const chart = ssrChart();
     const adapter = new GanttEChartsAdapter(engine, {
       theme: lightTheme,
-      now: () => null,
       showGrid: false,
       showRowBands: false,
       itemRenderer: (context) => ({
@@ -323,7 +320,7 @@ describe('rendering through a real ECharts instance', () => {
   it('renders a large frame within the visible-item cap', () => {
     const { engine } = fixture({ groups: 200, tasksPerGroup: 20 });
     const chart = ssrChart(1200, 800);
-    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+    const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
     adapter.attach(chart);
     track(adapter, chart);
 

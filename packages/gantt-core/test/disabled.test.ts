@@ -71,6 +71,43 @@ describe('disabled rows', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('emits row:disable per row for a bulk enable, top to bottom', () => {
+    const engine = makeEngine();
+    engine.setRowDisabled('c', true);
+    engine.setRowDisabled('a', true);
+
+    const listener = vi.fn();
+    engine.on('row:disable', listener);
+    engine.enableAllRows();
+
+    expect(listener.mock.calls.map((call) => call[0].row.group.id)).toEqual(['a', 'c']);
+    expect(listener.mock.calls.every((call) => call[0].disabled === false)).toBe(true);
+
+    // Nothing left to clear, nothing to report.
+    engine.enableAllRows();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports both directions of a wholesale set', () => {
+    const engine = makeEngine();
+    engine.setRowDisabled('a', true);
+
+    const listener = vi.fn();
+    engine.on('row:disable', listener);
+    engine.setDisabledRows(['b', 'c']);
+
+    expect(listener.mock.calls.map((call) => [call[0].row.group.id, call[0].disabled])).toEqual([
+      ['a', false],
+      ['b', true],
+      ['c', true],
+    ]);
+    expect(engine.isRowDisabled('a')).toBe(false);
+
+    // The same set again changes nothing, so it says nothing.
+    engine.setDisabledRows(['c', 'b']);
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
   it('seeds from group.disabled once, then keeps runtime state', () => {
     const engine = new GanttEngine({
       tasks,
@@ -177,6 +214,18 @@ describe('disabled rows', () => {
     expect(engine.drag.state).toBeNull();
   });
 
+  it('reports the state and the input policy separately', () => {
+    const engine = makeEngine();
+    engine.setRowDisabled('b', true);
+    expect(rowOf(engine, 'b').inert).toBe(true);
+
+    engine.setOptions({ interaction: { disabledRows: 'interactive' } });
+    // Still off — the fade and the gutter's muted label are the state, not the
+    // policy — but no longer out of reach.
+    expect(rowOf(engine, 'b').disabled).toBe(true);
+    expect(rowOf(engine, 'b').inert).toBe(false);
+  });
+
   it('leaves programmatic selection and edits alone', () => {
     const engine = makeEngine();
     engine.setRowDisabled('b', true);
@@ -189,5 +238,104 @@ describe('disabled rows', () => {
       { id: 'b1', start: 10, end: 110, groupId: 'b', previous: { start: 0, end: 100, groupId: 'b' } },
     ]);
     expect(engine.getTask('b1')?.start).toBe(10);
+  });
+});
+
+describe("disabled rows with interaction.disabledRows: 'interactive'", () => {
+  function makeInteractiveEngine(): GanttEngine {
+    const engine = new GanttEngine({
+      tasks,
+      groups,
+      size: { width: 800, height: 400 },
+      options: { minTimeSpan: 1, interaction: { disabledRows: 'interactive' } },
+    });
+    engine.setRowDisabled('b', true);
+    return engine;
+  }
+
+  it('takes clicks, drags and keyboard focus like any other row', () => {
+    const engine = makeInteractiveEngine();
+
+    engine.selection.handleClick('b1');
+    expect([...engine.selection.selected]).toEqual(['b1']);
+
+    expect(engine.drag.begin('b1', { x: 10, y: 10 })).toBe(true);
+    expect(engine.drag.state?.taskIds).toEqual(['b1']);
+    engine.drag.cancel();
+
+    engine.selection.handleClick('a2');
+    expect(engine.selection.moveFocus(1)).toBe('b1');
+  });
+
+  it('is picked up by marquee, select-all, invert and ranges', () => {
+    const engine = makeInteractiveEngine();
+    const everything = ['a1', 'a2', 'b1', 'b2', 'c1'];
+
+    engine.selection.selectAll();
+    expect([...engine.selection.selected].sort()).toEqual(everything);
+
+    engine.selection.clear();
+    engine.selection.invert();
+    expect([...engine.selection.selected].sort()).toEqual(everything);
+
+    engine.selection.clear();
+    const ids = engine.selection.selectRect({
+      x: -1,
+      width: 1000,
+      y: 0,
+      height: engine.getLayout().totalHeight,
+    });
+    expect([...ids].sort()).toEqual(everything);
+
+    expect(engine.selection.rangeBetween('a1', 'c1').sort()).toEqual(everything);
+  });
+
+  it('is a drop target for a drag crossing it', () => {
+    const engine = makeInteractiveEngine();
+    const layout = engine.getLayout();
+    const rowB = rowOf(engine, 'b');
+
+    engine.drag.begin('a1', { x: 10, y: layout.rows[0].y + 5 });
+    engine.drag.move({ x: 40, y: rowB.y + rowB.height / 2 });
+    expect(engine.drag.state?.deltaRow).toBe(1);
+    expect(engine.drag.preview()[0]?.groupId).toBe('b');
+  });
+
+  it('keeps the interaction state a disable would otherwise take away', () => {
+    const engine = makeInteractiveEngine();
+    engine.selection.set(['a1', 'b1']);
+    engine.setHovered('b1', rowOf(engine, 'b').index);
+    engine.drag.begin('b1', { x: 10, y: 10 });
+
+    engine.setRowDisabled('c', true);
+
+    expect([...engine.selection.selected].sort()).toEqual(['a1', 'b1']);
+    expect(engine.store.getState().hoveredTaskId).toBe('b1');
+    expect(engine.drag.state).not.toBeNull();
+  });
+
+  it('gives that state up the moment the policy switches back to blocking', () => {
+    const engine = makeInteractiveEngine();
+    engine.selection.set(['a1', 'b1']);
+    engine.setHovered('b1', rowOf(engine, 'b').index);
+    engine.drag.begin('b1', { x: 10, y: 10 });
+
+    engine.setOptions({ interaction: { disabledRows: 'block' } });
+
+    expect(rowOf(engine, 'b').inert).toBe(true);
+    expect([...engine.selection.selected]).toEqual(['a1']);
+    expect(engine.store.getState().hoveredTaskId).toBeNull();
+    expect(engine.drag.state).toBeNull();
+  });
+
+  it('changes no geometry either way', () => {
+    const engine = makeInteractiveEngine();
+    const before = engine.getLayout();
+
+    engine.setOptions({ interaction: { disabledRows: 'block' } });
+    const after = engine.getLayout();
+
+    expect(after.rows).toBe(before.rows);
+    expect(after.totalHeight).toBe(before.totalHeight);
   });
 });

@@ -1,7 +1,7 @@
 import type { GanttId, PointerModifiers, Rect } from '../types';
 import { EMPTY_SELECTION } from '../store/ganttState';
 import type { EngineContext } from './context';
-import { isTaskRowDisabled } from './layout';
+import { isTaskRowDisabled, isTaskRowInert } from './layout';
 import { queryRect } from './virtualize';
 
 export type SelectionMode = 'replace' | 'add' | 'remove' | 'toggle';
@@ -15,7 +15,7 @@ export type SelectionMode = 'replace' | 'add' | 'remove' | 'toggle';
  *
  * Everything that stands in for a gesture — {@link handleClick},
  * {@link selectRect}, {@link moveFocus}, {@link selectAll}, {@link invert} and
- * range building — skips tasks on disabled rows, and does nothing at all when
+ * range building — skips tasks on inert rows, and does nothing at all when
  * `interaction.selection` is off. The plain setters ({@link set}, {@link add},
  * {@link toggle}, {@link clear}) do neither: an explicit API call is the
  * consumer's own decision, not user input to be filtered.
@@ -76,7 +76,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
     const next = new Set<GanttId>();
     for (let rank = 0; rank < layout.rankToTask.length; rank++) {
       const taskIndex = layout.rankToTask[rank];
-      if (isTaskRowDisabled(layout, taskIndex)) continue;
+      if (isTaskRowInert(layout, taskIndex)) continue;
       next.add(model.tasks[taskIndex].id);
     }
     this.commit(next, this.anchor);
@@ -90,14 +90,23 @@ export class SelectionEngine<T = unknown, G = unknown> {
     const next = new Set<GanttId>();
     for (let rank = 0; rank < layout.rankToTask.length; rank++) {
       const taskIndex = layout.rankToTask[rank];
-      if (isTaskRowDisabled(layout, taskIndex)) continue;
+      if (isTaskRowInert(layout, taskIndex)) continue;
       const id = model.tasks[taskIndex].id;
       if (!current.has(id)) next.add(id);
     }
     this.commit(next, this.anchor);
   }
 
-  /** Is this task on a disabled row, and therefore out of reach of input? */
+  /** Is this task on a row that refuses input, and therefore out of reach? */
+  isInert(id: GanttId): boolean {
+    const index = this.ctx.getModel().taskIndexById.get(id);
+    return index !== undefined && isTaskRowInert(this.ctx.getLayout(), index);
+  }
+
+  /**
+   * Is this task on a disabled row? The state only — whether that also puts it
+   * out of reach of input is {@link isInert}.
+   */
   isDisabled(id: GanttId): boolean {
     const index = this.ctx.getModel().taskIndexById.get(id);
     return index !== undefined && isTaskRowDisabled(this.ctx.getLayout(), index);
@@ -115,7 +124,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
     if (!options.selection) return;
     // Gated here as well as in the view layer, so no path to a click can reach
     // a bar the row has opted out of.
-    if (this.isDisabled(id)) return;
+    if (this.isInert(id)) return;
 
     const additive = options.multiSelect && (modifiers.ctrl === true || modifiers.meta === true);
     const ranged = options.multiSelect && modifiers.shift === true;
@@ -138,7 +147,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
   /**
    * Every task id between two tasks in visual order, inclusive.
    *
-   * Tasks on disabled rows are stepped over: a range that spans one selects
+   * Tasks on inert rows are stepped over: a range that spans one selects
    * what lies either side of it, rather than reaching in.
    */
   rangeBetween(fromId: GanttId, toId: GanttId): GanttId[] {
@@ -157,7 +166,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
     const out: GanttId[] = [];
     for (let rank = lo; rank <= hi; rank++) {
       const taskIndex = layout.rankToTask[rank];
-      if (isTaskRowDisabled(layout, taskIndex)) continue;
+      if (isTaskRowInert(layout, taskIndex)) continue;
       out.push(model.tasks[taskIndex].id);
     }
     return out;
@@ -206,7 +215,7 @@ export class SelectionEngine<T = unknown, G = unknown> {
   /**
    * Move the selection by `delta` positions in visual order.
    *
-   * Disabled rows are skipped rather than landed on, so keyboard navigation
+   * Inert rows are skipped rather than landed on, so keyboard navigation
    * travels past one the same way the eye does. Returns null when there is
    * nothing reachable in that direction.
    */
@@ -221,13 +230,13 @@ export class SelectionEngine<T = unknown, G = unknown> {
     const currentRank = anchorIndex !== undefined ? layout.taskRank[anchorIndex] : -1;
     const startRank = currentRank < 0 ? (delta > 0 ? -1 : count) : currentRank;
 
-    // Walk one step at a time past disabled rows: `delta` is a distance in
+    // Walk one step at a time past inert rows: `delta` is a distance in
     // *reachable* bars, not in ranks.
     const step = delta > 0 ? 1 : -1;
     let remaining = Math.abs(delta);
     let nextRank = startRank;
     for (let rank = startRank + step; rank >= 0 && rank < count && remaining > 0; rank += step) {
-      if (isTaskRowDisabled(layout, layout.rankToTask[rank])) continue;
+      if (isTaskRowInert(layout, layout.rankToTask[rank])) continue;
       nextRank = rank;
       remaining--;
     }

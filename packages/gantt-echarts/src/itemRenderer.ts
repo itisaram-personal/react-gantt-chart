@@ -63,12 +63,14 @@ function itemOpacity(state: { disabled: boolean; dragging: boolean }): number {
 /**
  * Whether the bar wears its hover stroke.
  *
- * A bar on a disabled row is still hovered — that is what raises its tooltip,
+ * A bar on an inert row is still hovered — that is what raises its tooltip,
  * since the row remains readable — but the stroke is an offer of input the row
- * will not honour, so it stays off.
+ * will not honour, so it stays off. A disabled row that still takes input
+ * (`interaction.disabledRows: 'interactive'`) keeps the stroke: there the offer
+ * is good.
  */
-function emphasized(state: { hovered: boolean; disabled: boolean }): boolean {
-  return state.hovered && !state.disabled;
+function emphasized(state: { hovered: boolean; inert: boolean }): boolean {
+  return state.hovered && !state.inert;
 }
 
 /**

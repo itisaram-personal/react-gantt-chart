@@ -40,6 +40,9 @@ export const defaultOptions: GanttEngineOptions = {
     // A drag picks up a bar only once it is selected; on an unselected one it
     // falls through to `backgroundDrag` below.
     dragSelectedOnly: true,
+    // A disabled row ignores input. Set 'interactive' to keep the fade and let
+    // every gesture through.
+    disabledRows: "block",
     // Plain drag pans, like a map; hold a modifier to rubber-band instead.
     // Note that alt panning gives up remove-mode marquee, which is only
     // reachable through an alt drag — set `alt: 'marquee'` to get it back.

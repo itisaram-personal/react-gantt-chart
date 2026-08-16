@@ -26,7 +26,7 @@ function harness(options: Parameters<typeof fixture>[0] = {}): Harness {
   const { engine } = fixture(options);
   const chart = fakeChart(options.width ?? 800, options.height ?? 400);
   const dom = fakeElement();
-  const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme, now: () => null });
+  const adapter = new GanttEChartsAdapter(engine, { theme: lightTheme });
   adapter.attach(chart, dom.element);
   return { adapter, engine, dom, chart };
 }
@@ -703,6 +703,20 @@ describe('hover', () => {
     // Nothing on the row is a target, so no cursor is offered — an enabled row
     // shows `pointer` here.
     expect(dom.style.cursor).toBe('');
+  });
+
+  it("treats a disabled row as any other under disabledRows: 'interactive'", () => {
+    const { engine, dom } = setup();
+    engine.setOptions({ interaction: { disabledRows: 'interactive' } });
+    engine.setRowDisabled('g0', true);
+
+    // The cursor is offered again: the press it promises will be honoured.
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect(dom.style.cursor).toBe('pointer');
+
+    dom.dispatch('pointerdown', pointerEvent(ON_BAR.x, ON_BAR.y));
+    dom.dispatch('pointerup', pointerEvent(ON_BAR.x, ON_BAR.y));
+    expect([...engine.selection.selected]).toEqual(['g0-t0']);
   });
 
   it('does not re-hit-test while a gesture is running', () => {

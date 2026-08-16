@@ -6,7 +6,7 @@ import { DragEngine } from './engine/drag';
 import {
   barInset,
   computeLayout,
-  isTaskRowDisabled,
+  isTaskRowInert,
   laneTop,
   nearestRowIndex,
   rowIndexAt,
@@ -90,8 +90,12 @@ export class GanttEngine<T = unknown, G = unknown> {
 
   // --- memoized pipeline stages ---
   private rowCache: { key: string; value: RowModel<G> } | null = null;
-  /** Which (row model, disabled set) pair the rows are currently stamped with. */
-  private disabledStamp: { rows: RowModel<G>; disabled: ReadonlySet<GanttId> } | null = null;
+  /** Which (row model, disabled set, blocking policy) the rows are stamped with. */
+  private disabledStamp: {
+    rows: RowModel<G>;
+    disabled: ReadonlySet<GanttId>;
+    block: boolean;
+  } | null = null;
   private layoutCache: { rows: RowModel<G>; options: GanttEngineOptions; value: LayoutResult<G> } | null = null;
   private visibleCache: {
     layout: LayoutResult<G>;
@@ -209,6 +213,13 @@ export class GanttEngine<T = unknown, G = unknown> {
     if (previous.interaction.selection && !next.interaction.selection) {
       this.selection.clear();
     }
+    // Disabled rows going inert has to take the same things away a fresh
+    // disable would — a selection, a hover and a gesture on one are exactly the
+    // state the row is no longer allowed to hold.
+    if (previous.interaction.disabledRows !== next.interaction.disabledRows) {
+      this.getRows();
+      if (this.blocksDisabledInput) this.releaseInertState();
+    }
     this.events.emit('options:change', next);
   }
 
@@ -218,25 +229,31 @@ export class GanttEngine<T = unknown, G = unknown> {
 
   getRows(): RowModel<G> {
     const { collapsed, disabled } = this.store.getState();
+    const block = this.blocksDisabledInput;
     const key = `${this.model.revision}:${this.options.stacking.rollupCollapsed}:${collapsed.size}:${hashIds(collapsed)}`;
 
     let value = this.rowCache && this.rowCache.key === key ? this.rowCache.value : null;
     if (!value) {
-      value = resolveRows(this.model, collapsed, this.options.stacking.rollupCollapsed, disabled);
+      value = resolveRows(this.model, collapsed, this.options.stacking.rollupCollapsed, disabled, block);
       this.rowCache = { key, value };
-      this.disabledStamp = { rows: value, disabled };
+      this.disabledStamp = { rows: value, disabled, block };
       return value;
     }
 
-    // Disabled state is deliberately not part of the cache key: it changes no
-    // geometry, so a toggle re-stamps the cached rows instead of rebuilding
-    // them (and the layout that hangs off them).
+    // Neither the disabled set nor the blocking policy is part of the cache key:
+    // they change no geometry, so a toggle re-stamps the cached rows instead of
+    // rebuilding them (and the layout that hangs off them).
     const stamp = this.disabledStamp;
-    if (!stamp || stamp.rows !== value || stamp.disabled !== disabled) {
-      applyDisabled(value.rows, disabled);
-      this.disabledStamp = { rows: value, disabled };
+    if (!stamp || stamp.rows !== value || stamp.disabled !== disabled || stamp.block !== block) {
+      applyDisabled(value.rows, disabled, block);
+      this.disabledStamp = { rows: value, disabled, block };
     }
     return value;
+  }
+
+  /** Does `interaction.disabledRows` currently make a disabled row inert? */
+  private get blocksDisabledInput(): boolean {
+    return this.options.interaction.disabledRows !== 'interactive';
   }
 
   getLayout(): LayoutResult<G> {
@@ -346,30 +363,43 @@ export class GanttEngine<T = unknown, G = unknown> {
   }
 
   /**
-   * Is the row for `groupId` inert? See {@link GanttRow.disabled} for exactly
-   * what a disabled row ignores.
+   * Is the row for `groupId` switched off? What that does to input is
+   * `interaction.disabledRows` — see {@link GanttRow.inert}.
    */
   isRowDisabled(groupId: GanttId): boolean {
     return this.store.getState().disabled.has(groupId);
   }
 
+  /**
+   * Switch a row off (or back on). Emits `row:disable` for the row when the
+   * state actually changes, and nothing when it already had it.
+   */
   setRowDisabled(groupId: GanttId, disabled: boolean): void {
     const current = this.store.getState().disabled;
     if (current.has(groupId) === disabled) return;
     const next = new Set(current);
     if (disabled) next.add(groupId);
     else next.delete(groupId);
-    this.commitDisabled(next, groupId, disabled);
+    this.commitDisabled(next);
   }
 
   toggleRowDisabled(groupId: GanttId): void {
     this.setRowDisabled(groupId, !this.isRowDisabled(groupId));
   }
 
-  /** Re-enable every row. */
+  /**
+   * Re-enable every row. Emits `row:disable` once per row it switched back on,
+   * top to bottom — a listener persisting the state sees a bulk clear the same
+   * way it sees the buttons that could have done it one at a time.
+   */
   enableAllRows(): void {
     if (this.store.getState().disabled.size === 0) return;
-    this.commitDisabled(new Set<GanttId>(), null, false);
+    this.commitDisabled(new Set<GanttId>());
+  }
+
+  /** Switch off every row named, and switch on every row not named. */
+  setDisabledRows(groupIds: Iterable<GanttId>): void {
+    this.commitDisabled(new Set(groupIds));
   }
 
   /* ---------------------------------------------------------------- *
@@ -384,8 +414,8 @@ export class GanttEngine<T = unknown, G = unknown> {
    * headless testing.
    *
    * Deliberately truthful about disabled rows: it answers what is *there*, and
-   * the caller decides what input is allowed. `result.row.disabled` says
-   * whether acting on the hit would be ignored.
+   * the caller decides what input is allowed. `result.row.inert` says whether
+   * acting on the hit would be ignored.
    */
   hitTest(point: Point): HitTestResult<T, G> {
     const layout = this.getLayout();
@@ -570,21 +600,57 @@ export class GanttEngine<T = unknown, G = unknown> {
    * {@link getRows} is the only thing that has to catch up — but it does have
    * to drop the interaction state a row is no longer allowed to hold: a
    * selection on it, a hover, and a gesture in flight over it.
+   *
+   * `row:disable` is emitted per row that actually changed, whether one button
+   * did it or a bulk call did: a listener persisting the state can trust the
+   * event alone rather than diffing the set itself. The walk is over the
+   * *difference*, so a single toggle in a 100 000-group chart is still O(1) in
+   * the groups. Seeding from `group.disabled` stays silent — that is the data
+   * speaking, not a change to report back to it.
    */
-  private commitDisabled(next: ReadonlySet<GanttId>, groupId: GanttId | null, disabled: boolean): void {
+  private commitDisabled(next: ReadonlySet<GanttId>): void {
+    const previous = this.store.getState().disabled;
+    const changed: GanttId[] = [];
+    for (const id of previous) if (!next.has(id)) changed.push(id);
+    for (const id of next) if (!previous.has(id)) changed.push(id);
+    if (changed.length === 0) return;
+
     this.store.setState({ disabled: next });
     // Re-stamp before anything reads a row, so `row.disabled` and the store
     // never disagree.
-    this.getRows();
+    const rows = this.getRows();
+    this.releaseInertState();
 
+    // Top to bottom rather than in set order, so a bulk change reads the way
+    // the chart does.
+    const indexOf = (id: GanttId): number => this.model.groupIndexById.get(id) ?? -1;
+    if (changed.length > 1) changed.sort((a, b) => indexOf(a) - indexOf(b));
+
+    const layout = this.getLayout();
+    for (const id of changed) {
+      const rowIndex = rows.groupToRow[indexOf(id)];
+      const row = rowIndex >= 0 ? layout.rows[rowIndex] : null;
+      if (row) this.events.emit('row:disable', { row, disabled: next.has(id) });
+    }
+  }
+
+  /**
+   * Drop the interaction state no row is allowed to hold any more: a selection
+   * on an inert row, a hover on one, and a gesture in flight over one.
+   *
+   * Shared by a disable and by `interaction.disabledRows` turning to `'block'`
+   * — both make rows inert, and both have to take the same things away. A no-op
+   * while disabled rows stay interactive.
+   */
+  private releaseInertState(): void {
     const state = this.store.getState();
-    if (state.drag && this.dragTouchesDisabledRow(state.drag.taskIds)) this.drag.cancel();
+    if (state.drag && this.dragTouchesInertRow(state.drag.taskIds)) this.drag.cancel();
     if (state.selection.size > 0) {
       const layout = this.getLayout();
       const kept = new Set<GanttId>();
       for (const id of state.selection) {
         const index = this.model.taskIndexById.get(id);
-        if (index !== undefined && !isTaskRowDisabled(layout, index)) kept.add(id);
+        if (index !== undefined && !isTaskRowInert(layout, index)) kept.add(id);
       }
       if (kept.size !== state.selection.size) {
         const anchor = state.selectionAnchor;
@@ -593,23 +659,17 @@ export class GanttEngine<T = unknown, G = unknown> {
     }
     if (state.hoveredTaskId !== null) {
       const index = this.model.taskIndexById.get(state.hoveredTaskId);
-      if (index !== undefined && isTaskRowDisabled(this.getLayout(), index)) {
+      if (index !== undefined && isTaskRowInert(this.getLayout(), index)) {
         this.setHovered(null, state.hoveredRowIndex);
       }
     }
-
-    if (groupId !== null) {
-      const rowIndex = this.getRows().groupToRow[this.model.groupIndexById.get(groupId) ?? -1];
-      const row = rowIndex >= 0 ? this.getLayout().rows[rowIndex] : null;
-      if (row) this.events.emit('row:disable', { row, disabled });
-    }
   }
 
-  private dragTouchesDisabledRow(taskIds: readonly GanttId[]): boolean {
+  private dragTouchesInertRow(taskIds: readonly GanttId[]): boolean {
     const layout = this.getLayout();
     for (const id of taskIds) {
       const index = this.model.taskIndexById.get(id);
-      if (index !== undefined && isTaskRowDisabled(layout, index)) return true;
+      if (index !== undefined && isTaskRowInert(layout, index)) return true;
     }
     return false;
   }

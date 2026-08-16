@@ -3,9 +3,11 @@ import {
   RenderContextBuilder,
   type GanttEngine,
   type GanttTheme,
+  type GanttTimeMarker,
   type OverlayContext,
+  type ViewportState,
 } from '@gantt-chart/core';
-import type { GanttElement } from './elements';
+import { fontShorthand, type GanttElement } from './elements';
 import { defaultItemRenderer, type GanttItemRenderer } from './itemRenderer';
 import { computeTimeTicks, type TimeTickScale } from './timeScale';
 
@@ -51,8 +53,11 @@ export interface GanttOptionInput<T = unknown, G = unknown> {
   tickTargetPx?: number;
   locale?: string;
   weekStartsOn?: 0 | 1;
-  /** Epoch ms for the "now" marker. `null` hides it. */
-  now?: number | null;
+  /**
+   * Vertical lines at fixed instants — releases, freezes, sprint boundaries, and
+   * a "today" line if the chart wants one.
+   */
+  markers?: readonly GanttTimeMarker[];
   showRowBands?: boolean;
   showGrid?: boolean;
   /** Bars beyond this count are rendered in progressive chunks. */
@@ -73,8 +78,10 @@ export interface GanttOptionInput<T = unknown, G = unknown> {
 
 const Z_BACKGROUND = 1;
 const Z_ITEMS = 2;
-const Z_OVERLAY = 3;
-const Z_INTERACTION = 4;
+/** Marker chips clear the bars; their lines stay in the background with the grid. */
+const Z_MARKER_LABEL = 3;
+const Z_OVERLAY = 4;
+const Z_INTERACTION = 5;
 
 /**
  * Builds the whole chart option for the current frame.
@@ -120,6 +127,7 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
   });
 
   const items = window.items;
+  const markers = input.markers;
 
   /*
    * Gated on the *dataset* size, not on how many bars this frame happens to
@@ -145,7 +153,9 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
         children: [
           ...(showRowBands ? rowBandElements(engine, theme) : []),
           ...(showGrid ? gridElements(ticks, viewport.height, theme) : []),
-          ...nowElements(input.now ?? null, viewport, theme),
+          // Under the bars: a marker is a reference the chart is read against,
+          // not something drawn over the work.
+          ...markerLineElements(markers, viewport, theme),
         ],
       }),
     },
@@ -170,6 +180,21 @@ export function buildGanttOption<T, G>(input: GanttOptionInput<T, G>): GanttOpti
       },
     },
   ];
+
+  const markerLabels = markerLabelElements(markers, viewport, theme);
+  if (markerLabels.length > 0) {
+    series.push({
+      id: 'gantt-marker-labels',
+      type: 'custom',
+      coordinateSystem: 'none',
+      data: [0],
+      z: Z_MARKER_LABEL,
+      silent: true,
+      animation: false,
+      emphasis: { disabled: true },
+      renderItem: () => ({ type: 'group', silent: true, children: markerLabels }),
+    });
+  }
 
   const overlays = overlayElements(engine, viewport.width, viewport.height);
   if (overlays.length > 0) {
@@ -250,24 +275,123 @@ function gridElements(ticks: TimeTickScale, height: number, theme: GanttTheme): 
   return out;
 }
 
-function nowElements(
-  now: number | null,
-  viewport: { timeStart: number; timeEnd: number; width: number; height: number },
+/** Marker line width when the marker does not ask for one. */
+const MARKER_LINE_WIDTH = 1.5;
+const MARKER_LABEL_PADDING_X = 5;
+const MARKER_LABEL_PADDING_Y = 2;
+const MARKER_LABEL_TOP = 3;
+/** Gap a chip keeps from the one before it, px. */
+const MARKER_LABEL_GAP = 4;
+/** Chip text is trimmed to this before it is measured. */
+const MARKER_LABEL_MAX_CHARS = 40;
+
+/**
+ * Marker `x` in plot pixels, or null when it is outside the visible window.
+ *
+ * The bounds test is the whole reason a chart can be handed thousands of
+ * markers: everything off screen costs one comparison and no element.
+ */
+function markerX(time: number, viewport: ViewportState): number | null {
+  const span = viewport.timeEnd - viewport.timeStart;
+  if (span <= 0 || time < viewport.timeStart || time > viewport.timeEnd) return null;
+  return ((time - viewport.timeStart) / span) * viewport.width;
+}
+
+function markerLineElements(
+  markers: readonly GanttTimeMarker[] | undefined,
+  viewport: ViewportState,
   theme: GanttTheme,
 ): GanttElement[] {
-  if (now === null || now < viewport.timeStart || now > viewport.timeEnd) return [];
-  const span = viewport.timeEnd - viewport.timeStart;
-  if (span <= 0) return [];
-  const x = ((now - viewport.timeStart) / span) * viewport.width;
-  return [
-    {
+  if (!markers || markers.length === 0) return [];
+  const out: GanttElement[] = [];
+
+  for (const marker of markers) {
+    const x = markerX(marker.time, viewport);
+    if (x === null) continue;
+    out.push({
       type: 'line',
       shape: { x1: x, y1: 0, x2: x, y2: viewport.height },
-      style: { stroke: theme.colors.todayLine, lineWidth: 1.5 },
+      style: {
+        stroke: marker.color ?? theme.colors.markerLine,
+        lineWidth: marker.lineWidth ?? MARKER_LINE_WIDTH,
+        ...(marker.dashed ? { lineDash: [5, 4] } : null),
+      },
       silent: true,
       z2: 1,
-    },
-  ];
+    });
+  }
+  return out;
+}
+
+/**
+ * The chips that name the marker lines.
+ *
+ * Drawn in their own series *above* the bars, unlike the lines: a label under a
+ * task bar is a label nobody can read, and the first row is exactly where the
+ * chips sit.
+ *
+ * Placement is one left-to-right pass. A chip starts at its line and flips to
+ * the other side when it would leave the plot; one that would still land on the
+ * chip before it is dropped, since two overlapping labels are less use than one
+ * label and a bare line. That makes the pass order-dependent, so markers are
+ * sorted by time first — the caller's array order is theirs, not a drawing
+ * instruction.
+ */
+function markerLabelElements(
+  markers: readonly GanttTimeMarker[] | undefined,
+  viewport: ViewportState,
+  theme: GanttTheme,
+): GanttElement[] {
+  if (!markers || markers.length === 0) return [];
+
+  const labelled: { marker: GanttTimeMarker; x: number }[] = [];
+  for (const marker of markers) {
+    if (!marker.label) continue;
+    const x = markerX(marker.time, viewport);
+    if (x !== null) labelled.push({ marker, x });
+  }
+  if (labelled.length === 0) return [];
+  labelled.sort((a, b) => a.x - b.x);
+
+  const fontSize = theme.font.labelSize;
+  const out: GanttElement[] = [];
+  let occupiedTo = -Infinity;
+
+  for (const { marker, x } of labelled) {
+    const text =
+      marker.label!.length > MARKER_LABEL_MAX_CHARS
+        ? `${marker.label!.slice(0, MARKER_LABEL_MAX_CHARS - 1)}…`
+        : marker.label!;
+    // Canvas metrics are not available here (the option is built without a
+    // renderer, and is reused for export), so the chip is measured from the
+    // font size. Only chip *placement* depends on it — the text itself is laid
+    // out by zrender, so an imperfect estimate costs a little spacing, never a
+    // clipped label.
+    const width = text.length * fontSize * 0.62 + MARKER_LABEL_PADDING_X * 2;
+    const overflowsRight = x + width > viewport.width;
+    const left = overflowsRight ? x - width : x;
+    if (left < occupiedTo) continue;
+    occupiedTo = left + width + MARKER_LABEL_GAP;
+
+    out.push({
+      type: 'text',
+      style: {
+        text,
+        // The padded box is what `x`/`y` anchor, so this is the chip's corner.
+        x: left,
+        y: MARKER_LABEL_TOP,
+        fill: theme.colors.textInverse,
+        font: fontShorthand(theme.font.weight, fontSize, theme.font.family),
+        textAlign: 'left',
+        textVerticalAlign: 'top',
+        backgroundColor: marker.color ?? theme.colors.markerLine,
+        padding: [MARKER_LABEL_PADDING_Y, MARKER_LABEL_PADDING_X],
+        borderRadius: 3,
+      },
+      silent: true,
+    });
+  }
+  return out;
 }
 
 function overlayElements<T, G>(engine: GanttEngine<T, G>, width: number, height: number): GanttElement[] {

@@ -160,7 +160,7 @@ describe('background series', () => {
       expect(shape.width).toBe(engine.viewport.state.width);
     }
 
-    // One separator per row, plus one grid line per tick, plus the now marker.
+    // One separator per row, plus one grid line per tick.
     const lines = ofType(elements, 'line');
     expect(lines.length).toBeGreaterThanOrEqual(rowCount);
   });
@@ -187,7 +187,7 @@ describe('background series', () => {
     });
 
     const elements = renderSeries(
-      buildGanttOption({ engine, theme, ticks, showRowBands: false, now: null }),
+      buildGanttOption({ engine, theme, ticks, showRowBands: false }),
       'gantt-background',
     );
     const lines = ofType(elements, 'line');
@@ -209,36 +209,149 @@ describe('background series', () => {
     }
   });
 
-  it('shows the now marker only while it is inside the window', () => {
+  it('draws a today line from a marker, and nothing when there is none', () => {
     const { engine, theme } = fixture();
-    const inside = T0 + 3 * DAY;
+    const today = T0 + 3 * DAY;
+    const bare = { showGrid: false, showRowBands: false } as const;
 
-    const withMarker = renderSeries(
-      buildGanttOption({ engine, theme, now: inside, showGrid: false, showRowBands: false }),
-      'gantt-background',
+    // The chart draws no today line of its own — it is a marker like any other,
+    // and `theme.colors.todayLine` is the colour that makes it read as one.
+    const lines = ofType(
+      renderSeries(
+        buildGanttOption({
+          engine,
+          theme,
+          ...bare,
+          markers: [{ id: 'today', time: today, color: theme.colors.todayLine }],
+        }),
+        'gantt-background',
+      ),
+      'line',
     );
-    const markers = ofType(withMarker, 'line').filter(
-      (line) => (line.style as Record<string, string>).stroke === theme.colors.todayLine,
-    );
-    expect(markers).toHaveLength(1);
-    expect((markers[0].shape as Record<string, number>).x1).toBeCloseTo(
-      engine.viewport.timeToPx(inside),
+    expect(lines).toHaveLength(1);
+    expect((lines[0].style as Record<string, string>).stroke).toBe(theme.colors.todayLine);
+    expect((lines[0].shape as Record<string, number>).x1).toBeCloseTo(
+      engine.viewport.timeToPx(today),
       6,
     );
 
-    for (const now of [T0 - 30 * DAY, T0 + 300 * DAY, null]) {
+    // No markers at all: an empty plot background, where the built-in line used
+    // to appear whether it was wanted or not.
+    for (const markers of [undefined, []]) {
       const elements = renderSeries(
-        buildGanttOption({ engine, theme, now, showGrid: false, showRowBands: false }),
+        buildGanttOption({ engine, theme, ...bare, markers }),
         'gantt-background',
       );
       expect(ofType(elements, 'line')).toHaveLength(0);
     }
   });
 
+  it('draws a line per visible marker, and nothing for the rest', () => {
+    const { engine, theme } = fixture();
+    const bare = { showGrid: false, showRowBands: false } as const;
+    const markers = [
+      { id: 'freeze', time: T0 + 2 * DAY },
+      { id: 'release', time: T0 + 6 * DAY, color: '#16a34a', lineWidth: 3, dashed: true },
+      // Outside the 10-day window either side: skipped, not drawn off-canvas.
+      { id: 'past', time: T0 - 30 * DAY },
+      { id: 'future', time: T0 + 300 * DAY },
+    ];
+
+    const elements = renderSeries(
+      buildGanttOption({ engine, theme, ...bare, markers }),
+      'gantt-background',
+    );
+    const lines = ofType(elements, 'line');
+    expect(lines).toHaveLength(2);
+
+    const first = lines[0].style as Record<string, unknown>;
+    expect(first.stroke).toBe(theme.colors.markerLine);
+    expect(first.lineWidth).toBe(1.5);
+    expect(first.lineDash).toBeUndefined();
+    expect((lines[0].shape as Record<string, number>).x1).toBeCloseTo(
+      engine.viewport.timeToPx(T0 + 2 * DAY),
+      6,
+    );
+
+    // Each marker's own styling wins over the theme.
+    const second = lines[1].style as Record<string, unknown>;
+    expect(second.stroke).toBe('#16a34a');
+    expect(second.lineWidth).toBe(3);
+    expect(second.lineDash).toEqual([5, 4]);
+
+    // The line spans the whole plot.
+    const shape = lines[1].shape as Record<string, number>;
+    expect(shape.y1).toBe(0);
+    expect(shape.y2).toBe(engine.viewport.state.height);
+  });
+
+  it('puts marker chips in a series of their own, above the bars', () => {
+    const { engine, theme } = fixture();
+    const option = buildGanttOption({
+      engine,
+      theme,
+      markers: [{ time: T0 + 2 * DAY, label: 'Code freeze' }],
+    });
+
+    const labels = seriesById(option, 'gantt-marker-labels');
+    const items = seriesById(option, 'gantt-items');
+    expect(labels).toBeDefined();
+    // Above the bars: a chip under a task bar is a chip nobody can read.
+    expect(labels!.z).toBeGreaterThan(items!.z);
+
+    const texts = ofType(renderSeries(option, 'gantt-marker-labels'), 'text');
+    expect(texts).toHaveLength(1);
+    const style = texts[0].style as Record<string, unknown>;
+    expect(style.text).toBe('Code freeze');
+    expect(style.backgroundColor).toBe(theme.colors.markerLine);
+    expect(style.x).toBeCloseTo(engine.viewport.timeToPx(T0 + 2 * DAY), 6);
+  });
+
+  it('drops a chip that would land on the one before it, keeping the line', () => {
+    const { engine, theme } = fixture();
+    const option = buildGanttOption({
+      engine,
+      theme,
+      showGrid: false,
+      showRowBands: false,
+      // Half a day apart is ~40px at this scale — narrower than either chip.
+      markers: [
+        { time: T0 + 2 * DAY, label: 'Code freeze' },
+        { time: T0 + 2.5 * DAY, label: 'Release candidate' },
+      ],
+    });
+
+    expect(ofType(renderSeries(option, 'gantt-marker-labels'), 'text')).toHaveLength(1);
+    // Both lines still drawn — only the label was in the way.
+    expect(ofType(renderSeries(option, 'gantt-background'), 'line')).toHaveLength(2);
+  });
+
+  it('flips a chip to the left of its line rather than off the right edge', () => {
+    const { engine, theme } = fixture();
+    const width = engine.viewport.state.width;
+    const atEdge = engine.viewport.pxToTime(width - 4);
+
+    const texts = ofType(
+      renderSeries(
+        buildGanttOption({ engine, theme, markers: [{ time: atEdge, label: 'Cutover' }] }),
+        'gantt-marker-labels',
+      ),
+      'text',
+    );
+    expect(texts).toHaveLength(1);
+    expect((texts[0].style as Record<string, number>).x).toBeLessThan(width - 4);
+  });
+
+  it('emits no marker series when nothing is labelled', () => {
+    const { engine, theme } = fixture();
+    const option = buildGanttOption({ engine, theme, markers: [{ time: T0 + 2 * DAY }] });
+    expect(seriesById(option, 'gantt-marker-labels')).toBeUndefined();
+  });
+
   it('can drop bands and grid lines entirely', () => {
     const { engine, theme } = fixture();
     const elements = renderSeries(
-      buildGanttOption({ engine, theme, showRowBands: false, showGrid: false, now: null }),
+      buildGanttOption({ engine, theme, showRowBands: false, showGrid: false }),
       'gantt-background',
     );
     // Only the wrapping group survives.

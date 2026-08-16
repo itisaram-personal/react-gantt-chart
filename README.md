@@ -98,9 +98,15 @@ bars — the part that can number in the thousands — go through the canvas.
   route into a selection at once; `enableMarqueeSelection` makes the drag a
   rubber band you can start on a bar, in place of drag-to-move.
 - **Disabled rows** — a button after each y-axis label switches a row off: it
-  keeps its bars, faded, but ignores every interaction with them and is no
-  longer a drop target. Seed it with `group.disabled`, drive it with
-  `engine.setRowDisabled`.
+  keeps its bars, faded, and by default ignores every interaction with them and
+  is no longer a drop target. Seed it with `group.disabled`, drive it with
+  `engine.setRowDisabled`. `interaction.disabledRows: 'interactive'` keeps the
+  fade but lets every gesture through, for charts where "disabled" is the app's
+  own concept and only wants showing.
+- **Time markers** — `markers` draws vertical lines at fixed instants:
+  `{ time, label?, color?, dashed? }` each, lines under the bars and their chips
+  above. A "today" line is one of these rather than a feature of its own, so it
+  is yours to colour, label and re-date. Off-screen ones cost nothing.
 - **Background gesture** — a drag on empty space marquee-selects or pans,
   per modifier. `interaction.backgroundDrag` maps `plain`/`ctrl`/`shift`/`alt`
   to `'marquee' | 'pan' | 'none'`; the default pans on a plain drag and marquees
