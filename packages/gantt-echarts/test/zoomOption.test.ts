@@ -190,10 +190,11 @@ describe("buildTimeZoomOption", () => {
     expect(option.series[0].silent).toBe(true);
   });
 
-  it("keeps the window itself draggable", () => {
+  it("brushes a range out of the track", () => {
     const { dataZoom } = buildTimeZoomOption({ domain: DOMAIN, window, theme: lightTheme });
-    // `brushSelect` would silence the filler and move the grip to its own strip.
-    expect(dataZoom[0].brushSelect).toBe(false);
+    expect(dataZoom[0].brushSelect).toBe(true);
+    // The grip the brush costs the window is the track's edge, not a drawn
+    // strip: ECharts would lay that one outside the slider.
     expect(dataZoom[0].moveHandleSize).toBe(0);
     expect(dataZoom[0].realtime).toBe(true);
   });
@@ -257,7 +258,7 @@ describe("buildRowZoomOption", () => {
     expect(slider.showDataShadow).toBe(false);
   });
 
-  it("brushes a band of rows, unlike the time bar", () => {
+  it("brushes a band of rows, as the time bar brushes a range", () => {
     const slider = buildRowZoomOption({ window, theme: lightTheme }).dataZoom[0];
 
     expect(slider.brushSelect).toBe(true);

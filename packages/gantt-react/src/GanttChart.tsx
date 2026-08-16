@@ -213,9 +213,10 @@ export interface GanttChartProps<T = unknown, G = unknown> {
   showRowBands?: boolean;
   /**
    * Horizontal zoom bar under the plot: an ECharts `dataZoom` slider over the
-   * whole time domain, with a task-density overview behind the window. Drag the
-   * window to pan, its handles to zoom. Off by default — it adds a strip below
-   * the body.
+   * whole time domain, with a task-density overview behind the window. Draw a
+   * band over the track, or drag the window's handles, to zoom to a range; the
+   * strip along the edge of the track drags the window to pan. Off by default —
+   * it adds a strip below the body.
    */
   showTimeZoomBar?: boolean;
   /**

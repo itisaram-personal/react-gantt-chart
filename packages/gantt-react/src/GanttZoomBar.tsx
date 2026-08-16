@@ -259,8 +259,10 @@ export interface GanttTimeZoomBarProps<T, G> {
 /**
  * Horizontal `dataZoom` slider over the whole time domain.
  *
- * The window is the visible time range, so dragging its body pans and dragging a
- * handle zooms. `setTimeRange` already clamps to the domain and to
+ * The window is the visible time range, so dragging a handle zooms and drawing a
+ * band over the track jumps straight to the range under it, read against the
+ * density overview. The strip along the edge of the track drags the window as it
+ * is, which pans. `setTimeRange` already clamps to the domain and to
  * `min`/`maxTimeSpan`, so nothing here needs to re-check those bounds.
  */
 export function GanttTimeZoomBar<T, G>({
