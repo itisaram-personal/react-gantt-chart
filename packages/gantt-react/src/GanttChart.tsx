@@ -219,8 +219,9 @@ export interface GanttChartProps<T = unknown, G = unknown> {
    */
   showTimeZoomBar?: boolean;
   /**
-   * Vertical `dataZoom` slider beside the plot. Drag the window to scroll, its
-   * handles to scale row height so the selected rows fill the plot. Off by
+   * Vertical `dataZoom` slider beside the plot. Draw a band over the track, or
+   * drag the window's handles, to scale row height so those rows fill the plot;
+   * the strip along the edge of the track drags the window to scroll. Off by
    * default.
    */
   showRowZoomBar?: boolean;

@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/echarts",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "ECharts custom-series adapter for the Gantt engine.",
   "license": "MIT",
   "repository": {
@@ -32,7 +32,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gantt-chart/core": "^0.1.4",
+    "@gantt-chart/core": "^0.1.5",
     "echarts": "^5.4.0"
   },
   "devDependencies": {

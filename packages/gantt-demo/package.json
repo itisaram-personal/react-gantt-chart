@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/demo",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Demo app exercising the Gantt chart at 100K+ items.",
   "type": "module",
@@ -11,10 +11,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gantt-chart/core": "^0.1.4",
-    "@gantt-chart/echarts": "^0.1.4",
-    "@gantt-chart/react": "^0.1.4",
-    "@gantt-chart/themes": "^0.1.4",
+    "@gantt-chart/core": "^0.1.5",
+    "@gantt-chart/echarts": "^0.1.5",
+    "@gantt-chart/react": "^0.1.5",
+    "@gantt-chart/themes": "^0.1.5",
     "echarts": "^5.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

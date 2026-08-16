@@ -192,16 +192,21 @@ function RowEnableButton<T, G>({
       // The row's own double-click means something else entirely.
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      {/* Drawn rather than typed: no font ships a power glyph reliably. */}
+      {/*
+        A forbidden sign in both states — drawn rather than typed, because no
+        font ships the glyph reliably. Which state it means is carried by
+        colour: muted while the row is on (the action available), accented once
+        it is off (the state it is in).
+      */}
       <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
         <path
-          d="M4.5 4.6a4.8 4.8 0 1 0 7 0"
+          d="M4 4l8 8"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.7"
           strokeLinecap="round"
         />
-        <path d="M8 1.8v5.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
       </svg>
     </button>
   );

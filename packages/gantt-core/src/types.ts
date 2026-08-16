@@ -100,8 +100,12 @@ export interface GanttRow<G = unknown> {
   collapsed: boolean;
   /**
    * The row is inert: its bars ignore every data interaction — selection,
-   * click and double-click events, drag, resize, marquee and hover — and no
-   * drag may drop a task onto it.
+   * click and double-click events, drag, resize and marquee — and no drag may
+   * drop a task onto it.
+   *
+   * Read-only affordances are not interactions and stay: the bars still hover,
+   * which is what keeps their tooltip, though they wear no hover emphasis and
+   * offer no cursor, since neither would lead anywhere.
    *
    * View-level controls keep working, so a disabled row can still be
    * collapsed, right-clicked and re-enabled. Programmatic APIs

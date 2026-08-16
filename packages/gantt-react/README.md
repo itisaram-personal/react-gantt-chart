@@ -204,12 +204,15 @@ literal is safe there.
 
 ## Disabling a row
 
-Right after each row's label sits a power button that switches the row off. A
-disabled row keeps its bars — faded, so it still reads as data — but ignores
-every interaction with them: selection, clicks, double-clicks, drag, resize,
-marquee and hover, and no drag from elsewhere can drop a task onto it. Its own
-controls keep working, so it can still be collapsed, right-clicked and switched
-back on.
+Right after each row's label sits a forbidden-sign button that switches the row
+off; once the row is off it stays visible and accented, so there is always a way
+back. A disabled row keeps its bars — faded, so it still reads as data — but
+ignores every interaction with them: selection, clicks, double-clicks, drag,
+resize and marquee, and no drag from elsewhere can drop a task onto it. They do
+still raise their tooltip on hover, since reading a bar changes nothing; what
+they drop is the hover emphasis and the cursor, which would offer input the row
+will not take. Its own controls keep working, so it can still be collapsed,
+right-clicked and switched back on.
 
 ```tsx
 <GanttChart

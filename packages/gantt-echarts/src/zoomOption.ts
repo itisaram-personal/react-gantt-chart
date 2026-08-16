@@ -1,4 +1,4 @@
-import { clamp, type GanttEngine, type GanttTheme } from '@gantt-chart/core';
+import { clamp, type GanttEngine, type GanttTheme } from "@gantt-chart/core";
 
 /**
  * The `dataZoom` sliders: the option each renders from, and the mapping between
@@ -175,7 +175,7 @@ export function rowZoomLaneHeight(input: RowZoomLaneHeightInput): number | null 
 
 /** The bits of an axis a slider-only chart needs: an extent, and nothing drawn. */
 export interface GanttZoomAxis {
-  type: 'value';
+  type: "value";
   show: false;
   min: number;
   max: number;
@@ -191,19 +191,19 @@ export interface GanttZoomAxis {
  * itself through `dataBackground`.
  */
 export interface GanttZoomSeries {
-  type: 'line';
+  type: "line";
   silent: true;
   animation: false;
-  symbol: 'none';
+  symbol: "none";
   lineStyle: { opacity: 0 };
   areaStyle: { opacity: 0 };
   data: [number, number][];
 }
 
 export interface GanttZoomSlider {
-  type: 'slider';
+  type: "slider";
   show: true;
-  orient: 'horizontal' | 'vertical';
+  orient: "horizontal" | "vertical";
   xAxisIndex?: number;
   yAxisIndex?: number;
   start: number;
@@ -214,12 +214,22 @@ export interface GanttZoomSlider {
   top: number;
   bottom: number;
   /**
-   * Off, which is what makes the window itself the pan grip: ECharts silences
-   * the filler when `brushSelect` is on, and reserves a separate strip below the
-   * track for moving the window. Dragging the window to pan is the primary
-   * gesture here, so the filler keeps its pointer events.
+   * Decided per slider, because the two want opposite things from the track.
+   *
+   * With it on, ECharts hands the track over to drawing a *new* window — a drag
+   * anywhere on it brushes one out — and silences the filler, leaving the
+   * existing window to be moved from a strip of its own along the edge. With it
+   * off, the filler keeps its pointer events and dragging the window is what
+   * pans.
+   *
+   * Off on the time bar, where panning is the gesture that matters and the
+   * handles already zoom. On on the row bar, where brushing a band of rows to
+   * zoom to them is worth more than a drag that only scrolls — see
+   * {@link buildRowZoomOption}.
    */
-  brushSelect: false;
+  brushSelect: boolean;
+  /** The band drawn while brushing. Only reachable with {@link brushSelect}. */
+  brushStyle: { color: string };
   realtime: true;
   backgroundColor: string;
   borderColor: string;
@@ -227,7 +237,13 @@ export interface GanttZoomSlider {
   fillerColor: string;
   handleSize: string;
   handleStyle: { color: string; borderColor: string };
-  /** No separate move strip — the window is the grip. See {@link brushSelect}. */
+  /**
+   * No *drawn* move strip. ECharts lays that handle outside the track, past the
+   * thickness a slider filling its own canvas has already used up, so it would
+   * be clipped away rather than seen. Its invisible grab zone survives at zero
+   * size — ECharts gives it a 10px floor — which is what still lets the row
+   * bar's window be dragged along the edge with {@link brushSelect} on.
+   */
   moveHandleSize: 0;
   /**
    * Off on both sliders.
@@ -284,21 +300,23 @@ export function buildTimeZoomOption(input: TimeZoomOptionInput): GanttZoomOption
   return {
     ...zoomChrome(),
     xAxis: {
-      type: 'value',
+      type: "value",
       show: false,
       min: domain[0],
       max: domain[1],
       splitLine: { show: false },
     },
-    yAxis: { type: 'value', show: false, min: 0, max: 1, splitLine: { show: false } },
+    yAxis: { type: "value", show: false, min: 0, max: 1, splitLine: { show: false } },
     dataZoom: [
       {
         ...slider(theme),
-        orient: 'horizontal',
+        orient: "horizontal",
         xAxisIndex: 0,
         start: window.start,
         end: window.end,
         showDataShadow: shadow,
+        // The window is the pan grip here. See {@link GanttZoomSlider.brushSelect}.
+        brushSelect: true,
       },
     ],
     series: [
@@ -333,15 +351,23 @@ export interface RowZoomOptionInput {
  * The axis is inverted so fraction 0 is at the top of the bar, where the first
  * row is: ECharts lays a vertical slider out from the axis minimum, and an
  * upright value axis puts its minimum at the bottom.
+ *
+ * Unlike the time bar it brushes: a drag anywhere on the track draws a band, and
+ * the rows under it become the window — which, since the window is what sets the
+ * scale, is a zoom straight to a stretch of rows however far off screen it
+ * starts. The cost is the filler, which ECharts silences to make room for the
+ * gesture, so dragging the window itself scrolls only from the strip along the
+ * edge of the track. Scrolling has the wheel, the gutter and the scrollbar;
+ * zooming to a run of rows had nothing.
  */
 export function buildRowZoomOption(input: RowZoomOptionInput): GanttZoomOption {
   const { window, theme } = input;
 
   return {
     ...zoomChrome(),
-    xAxis: { type: 'value', show: false, min: 0, max: 1, splitLine: { show: false } },
+    xAxis: { type: "value", show: false, min: 0, max: 1, splitLine: { show: false } },
     yAxis: {
-      type: 'value',
+      type: "value",
       show: false,
       min: 0,
       max: 1,
@@ -351,11 +377,14 @@ export function buildRowZoomOption(input: RowZoomOptionInput): GanttZoomOption {
     dataZoom: [
       {
         ...slider(theme),
-        orient: 'vertical',
+        orient: "vertical",
         yAxisIndex: 0,
         start: window.start,
         end: window.end,
         showDataShadow: false,
+        // Drawing a band over the rows zooms to them. See
+        // {@link GanttZoomSlider.brushSelect}.
+        brushSelect: true,
       },
     ],
     series: [
@@ -370,47 +399,57 @@ export function buildRowZoomOption(input: RowZoomOptionInput): GanttZoomOption {
   };
 }
 
-function zoomChrome(): Omit<GanttZoomOption, 'xAxis' | 'yAxis' | 'dataZoom' | 'series'> {
+function zoomChrome(): Omit<GanttZoomOption, "xAxis" | "yAxis" | "dataZoom" | "series"> {
   return {
     animation: false,
     // The strip's own background shows through, so the track is themed in one
     // place — the slider's `backgroundColor`.
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     grid: { left: 0, right: 0, top: 0, height: 0, show: false },
   };
 }
 
-function zoomSeries(): Omit<GanttZoomSeries, 'data'> {
+function zoomSeries(): Omit<GanttZoomSeries, "data"> {
   return {
-    type: 'line',
+    type: "line",
     silent: true,
     animation: false,
-    symbol: 'none',
+    symbol: "none",
     lineStyle: { opacity: 0 },
     areaStyle: { opacity: 0 },
   };
 }
 
-/** Styling shared by both sliders, taken off the theme. */
-type SliderChrome = Omit<GanttZoomSlider, 'orient' | 'start' | 'end' | 'showDataShadow'>;
+/**
+ * Styling shared by both sliders, taken off the theme.
+ *
+ * `brushSelect` is left out with the rest of what the two sliders disagree
+ * about: it is a gesture decision, not chrome, and each builder states its own.
+ */
+type SliderChrome = Omit<
+  GanttZoomSlider,
+  "orient" | "start" | "end" | "showDataShadow" | "brushSelect"
+>;
 
 function slider(theme: GanttTheme): SliderChrome {
   const { colors } = theme;
   return {
-    type: 'slider',
+    type: "slider",
     show: true,
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    brushSelect: false,
     realtime: true,
     backgroundColor: colors.scrollbarTrack,
     borderColor: colors.border,
     borderRadius: 3,
     fillerColor: withAlpha(colors.scrollbarThumb, 0.55),
-    handleSize: '100%',
+    handleSize: "100%",
     handleStyle: { color: colors.background, borderColor: colors.accent },
+    // Themed here rather than left to ECharts' own blue, which is tuned for a
+    // light chart and reads as a smear on a dark one.
+    brushStyle: { color: withAlpha(colors.accent, 0.18) },
     moveHandleSize: 0,
     showDetail: false,
     dataBackground: {

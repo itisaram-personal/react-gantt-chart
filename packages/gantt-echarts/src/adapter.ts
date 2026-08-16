@@ -544,12 +544,14 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
       }
       default: {
         const hit = this.engine.hitTest(point);
-        // The row still reports as hovered — that is what reveals its gutter
-        // controls — but nothing on it is a hover target, so no tooltip, no
-        // emphasis and no grab cursor.
-        const taskId = hit.row?.disabled ? null : (hit.task?.id ?? null);
+        // Hover is reported truthfully, disabled row or not: a disabled row is
+        // still readable, so its bars keep their tooltip, and the row itself
+        // still lights up and reveals its gutter controls. What a disabled row
+        // withholds is anything that offers input — the emphasis stroke (the
+        // item renderer drops it) and the grab cursor (below).
+        const taskId = hit.task?.id ?? null;
         this.engine.setHovered(taskId, hit.rowIndex >= 0 ? hit.rowIndex : null);
-        this.updateCursor(taskId, point);
+        this.updateCursor(hit.row?.disabled ? null : taskId, point);
       }
     }
   }

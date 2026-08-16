@@ -328,10 +328,12 @@ export interface GanttRowZoomBarProps<T, G> {
 /**
  * Vertical `dataZoom` slider over the rows.
  *
- * Dragging the body scrolls. Dragging a handle is a genuine vertical zoom: the
- * window says how much content should be on screen, and `metrics.laneHeight` is
- * rescaled so that exactly that much fills the plot — so rows get taller as the
- * window narrows.
+ * Dragging a handle is a genuine vertical zoom: the window says how much content
+ * should be on screen, and `metrics.laneHeight` is rescaled so that exactly that
+ * much fills the plot — so rows get taller as the window narrows. Drawing a band
+ * anywhere on the track is the same move in one gesture, landing on a stretch of
+ * rows however far from the current window it starts; the strip along the edge
+ * of the track drags the window as it is, which scrolls.
  *
  * The window is a *fraction* of total content height rather than a pixel offset.
  * Rescaling lane heights changes `totalHeight`, so a pixel anchor would slide out

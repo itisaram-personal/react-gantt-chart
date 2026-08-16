@@ -61,6 +61,17 @@ function itemOpacity(state: { disabled: boolean; dragging: boolean }): number {
 }
 
 /**
+ * Whether the bar wears its hover stroke.
+ *
+ * A bar on a disabled row is still hovered — that is what raises its tooltip,
+ * since the row remains readable — but the stroke is an offer of input the row
+ * will not honour, so it stays off.
+ */
+function emphasized(state: { hovered: boolean; disabled: boolean }): boolean {
+  return state.hovered && !state.disabled;
+}
+
+/**
  * The built-in look: rounded bars, diamond milestones, an optional progress
  * fill, and a label clipped to the on-screen part of the bar.
  */
@@ -79,7 +90,7 @@ function renderBar<T, G>(context: GanttRenderContext<T, G>): GanttElement | null
 
   const stroke = state.selected
     ? theme.colors.selectionStroke
-    : state.hovered
+    : emphasized(state)
       ? theme.colors.hoverStroke
       : theme.colors.taskStroke;
   const lineWidth = state.selected
@@ -178,7 +189,7 @@ function renderMilestone<T, G>(context: GanttRenderContext<T, G>): GanttElement 
       fill,
       stroke: state.selected
         ? theme.colors.selectionStroke
-        : state.hovered
+        : emphasized(state)
           ? theme.colors.hoverStroke
           : theme.colors.taskStroke,
       lineWidth: state.selected ? theme.metrics.selectedStrokeWidth : theme.metrics.itemStrokeWidth,

@@ -357,8 +357,12 @@
  * The enable/disable button.
  *
  * Same reveal-on-hover rules as the options button beside it — see the comment
- * there — with one addition: a row that is *off* keeps its button on screen
- * permanently, because it is the only affordance that turns the row back on.
+ * there — with two differences: a row that is *off* keeps its button on screen
+ * permanently, because it is the only affordance that turns the row back on;
+ * and plain `:focus` does not reveal it. Clicking the button leaves focus on it,
+ * so `:focus` would pin a just-re-enabled button visible after the pointer has
+ * left the row, until some other element took focus. `:focus-visible` alone
+ * still covers keyboard users, who need it and do not trigger it by clicking.
  */
 .gantt-gutter__power {
   flex: 0 0 auto;
@@ -380,7 +384,6 @@
 }
 
 .gantt-gutter__row:hover .gantt-gutter__power,
-.gantt-gutter__power:focus,
 .gantt-gutter__power:focus-visible,
 .gantt-gutter__power.is-off {
   opacity: 1;

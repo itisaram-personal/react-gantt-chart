@@ -691,6 +691,20 @@ describe('hover', () => {
     expect(dom.style.cursor).toBe('grab');
   });
 
+  it('still hovers a bar on a disabled row, without offering a cursor', () => {
+    const { engine, dom } = setup();
+    engine.setRowDisabled('g0', true);
+
+    dom.dispatch('pointermove', pointerEvent(ON_BAR.x, ON_BAR.y));
+    // The bar reports as hovered, which is what raises its tooltip: a disabled
+    // row is out of reach, not unreadable.
+    expect(engine.store.getState().hoveredTaskId).toBe('g0-t0');
+    expect(engine.store.getState().hoveredRowIndex).toBe(0);
+    // Nothing on the row is a target, so no cursor is offered — an enabled row
+    // shows `pointer` here.
+    expect(dom.style.cursor).toBe('');
+  });
+
   it('does not re-hit-test while a gesture is running', () => {
     const { engine, dom } = setup();
     dom.dispatch('pointermove', pointerEvent(ON_BAR.x, ON_BAR.y));
