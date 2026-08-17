@@ -555,7 +555,9 @@ export class GanttEChartsAdapter<T = unknown, G = unknown> {
         // withholds is anything that offers input — the emphasis stroke (the
         // item renderer drops it) and the grab cursor (below).
         const taskId = hit.task?.id ?? null;
-        this.engine.setHovered(taskId, hit.rowIndex >= 0 ? hit.rowIndex : null);
+        // The point rides along so anything the hover opens — a tooltip — can be
+        // put where the pointer is rather than where the bar happens to end.
+        this.engine.setHovered(taskId, hit.rowIndex >= 0 ? hit.rowIndex : null, point);
         this.updateCursor(hit.row?.inert ? null : taskId, point);
       }
     }

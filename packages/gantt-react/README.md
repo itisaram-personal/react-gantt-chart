@@ -132,6 +132,11 @@ nothing; moving to a second bar takes the first one's tooltip down at once
 rather than leaving it over the wrong task while the new wait runs. `0` opens on
 contact, and `tooltip={false}` drops the tooltip altogether.
 
+The box opens beside the pointer — a long bar can be wider than the window, so
+its own ends are no guide to where the cursor is — and stays put once open
+instead of following the pointer around the bar. It flips to whichever side has
+room and is clamped to the plot.
+
 ## Selection
 
 Two props cover the common cases; `options.interaction` is still there for

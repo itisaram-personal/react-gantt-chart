@@ -5,6 +5,7 @@ import {
   type GanttId,
   type GanttTask,
   type GanttTheme,
+  type Point,
   type Rect,
   type ViewportState,
 } from '@gantt-chart/core';
@@ -22,7 +23,8 @@ export interface GanttTooltipProps<T, G> {
   locale?: string;
   /** Return `null` to suppress the tooltip for a task. */
   render?: (context: GanttTooltipContext<T, G>) => ReactNode | null;
-  /** Offset from the bar, px. */
+  /** Gap between the box and what it is anchored to — the pointer, or the bar
+   * for a hover that arrived without one. Px. */
   offset?: number;
   /**
    * Let the pointer into the tooltip, so its content can be hovered, selected
@@ -51,11 +53,20 @@ export interface GanttTooltipProps<T, G> {
 interface HeldHover {
   taskId: GanttId;
   rowIndex: number | null;
+  /**
+   * Where the pointer was when this tooltip opened, plot px, or null for a hover
+   * that arrived without one (a gutter row, a key press).
+   *
+   * Snapshotted rather than followed: a box that chased the pointer around the
+   * bar would be a moving target to read, and an interactive one would shove
+   * itself out from under the cursor trying to reach it.
+   */
+  point: Point | null;
 }
 
 /**
- * Hover tooltip, positioned from the engine's own geometry and confined to the
- * plot.
+ * Hover tooltip, opened beside the pointer that asked for it, positioned from
+ * the engine's own geometry and confined to the plot.
  *
  * Nothing is rendered while nothing is hovered, so the common case costs one
  * subscription and no DOM.
@@ -134,14 +145,16 @@ export function GanttTooltip<T, G>({
       if (heldRef.current !== null && heldRef.current.taskId === hoveredTaskId) {
         cancelOpen();
         if (heldRef.current.rowIndex !== hoveredRowIndex) {
-          setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+          // Same box, so it keeps the point it opened at: the row it is filed
+          // under changed, not where the reader asked for it.
+          setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex, point: heldRef.current.point });
         }
         return;
       }
 
       if (openDelay <= 0) {
         cancelOpen();
-        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex, point: engine.hoverPoint });
         return;
       }
 
@@ -153,7 +166,10 @@ export function GanttTooltip<T, G>({
       cancelOpen();
       openTimer.current = window.setTimeout(() => {
         openTimer.current = null;
-        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex });
+        // Read at the end of the dwell, not the start: the pointer is allowed to
+        // wander across the bar while it runs down, and the box belongs where it
+        // came to rest.
+        setHeld({ taskId: hoveredTaskId, rowIndex: hoveredRowIndex, point: engine.hoverPoint });
       }, openDelay);
       return;
     }
@@ -168,7 +184,17 @@ export function GanttTooltip<T, G>({
       return;
     }
     if (!inside.current) closeSoon();
-  }, [hoveredTaskId, hoveredRowIndex, dragging, interactive, openDelay, cancelOpen, cancelClose, closeSoon]);
+  }, [
+    engine,
+    hoveredTaskId,
+    hoveredRowIndex,
+    dragging,
+    interactive,
+    openDelay,
+    cancelOpen,
+    cancelClose,
+    closeSoon,
+  ]);
 
   // Cancel pending timers on unmount, not on every dependency change.
   useEffect(() => cancelClose, [cancelClose]);
@@ -271,7 +297,7 @@ export function GanttTooltip<T, G>({
   const content = render ? render({ task, engine, locale }) : defaultContent(task, locale);
   if (content === null || content === undefined) return null;
 
-  const position = place(rect, size, engine.viewport.state, offset);
+  const position = place(rect, size, engine.viewport.state, offset, held.point);
 
   return (
     <div
@@ -293,10 +319,19 @@ export function GanttTooltip<T, G>({
 }
 
 /**
- * Where the box goes: right of the bar when it fits there, left of it when that
- * is where the room is, and against the nearer edge when neither side has any.
- * Both axes are then clamped to the plot, so a tooltip on the last row or the
- * far right stays inside the chart instead of hanging over the zoom bars.
+ * Where the box goes: beside the pointer when the hover came from one, and
+ * beside the bar when it did not. Right of the anchor when it fits there, left
+ * of it when that is where the room is, and against the nearer edge when neither
+ * side has any. Both axes are then clamped to the plot, so a tooltip on the last
+ * row or the far right stays inside the chart instead of hanging over the zoom
+ * bars.
+ *
+ * The pointer is the better anchor because a bar is as wide as its task is long:
+ * on a multi-month one — or any bar running off the edge of the window — the
+ * edges are nowhere near the cursor that asked for the tooltip, and can be off
+ * screen entirely. Vertically the bar still wins: the pointer is inside it, so
+ * its top is already at the cursor, and aligning to it keeps a column of
+ * tooltips level as the pointer sweeps a row.
  *
  * `size` is zero for the first render of a given tooltip, before the layout
  * effect has measured it: that pass lands on the preferred side unclamped, and
@@ -307,9 +342,12 @@ function place(
   size: { width: number; height: number },
   viewport: ViewportState,
   offset: number,
+  pointer: Point | null,
 ): { x: number; y: number } {
-  const right = rect.x + rect.width + offset;
-  const left = rect.x - offset - size.width;
+  const anchorStart = pointer ? pointer.x : rect.x;
+  const anchorEnd = pointer ? pointer.x : rect.x + rect.width;
+  const right = anchorEnd + offset;
+  const left = anchorStart - offset - size.width;
   const preferred = right + size.width <= viewport.width ? right : left >= 0 ? left : right;
 
   return {

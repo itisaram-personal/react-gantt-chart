@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/core",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Framework-agnostic Gantt engine: layout, stacking, virtualization, selection, drag, state.",
   "license": "MIT",
   "repository": {

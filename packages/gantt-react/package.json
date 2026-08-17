@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/react",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "React components and hooks for the high-performance ECharts Gantt chart.",
   "license": "MIT",
   "repository": {
@@ -33,9 +33,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gantt-chart/core": "^0.1.9",
-    "@gantt-chart/echarts": "^0.1.9",
-    "@gantt-chart/themes": "^0.1.9",
+    "@gantt-chart/core": "^0.1.10",
+    "@gantt-chart/echarts": "^0.1.10",
+    "@gantt-chart/themes": "^0.1.10",
     "echarts": "^5.4.0"
   },
   "peerDependencies": {

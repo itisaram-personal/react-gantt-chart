@@ -82,6 +82,8 @@ export class GanttEngine<T = unknown, G = unknown> {
   private groupsInput: readonly GanttGroup<G>[] | undefined;
   private revision = 0;
   private disposed = false;
+  /** Last pointer position handed to {@link setHovered}. Deliberately not state. */
+  private hoverPointValue: Point | null = null;
   private readonly warn: boolean;
   private readonly teardowns: Unsubscribe[] = [];
   private readonly plugins = new Map<string, GanttPlugin<T, G>>();
@@ -325,11 +327,26 @@ export class GanttEngine<T = unknown, G = unknown> {
    * Interaction state
    * ---------------------------------------------------------------- */
 
-  setHovered(taskId: GanttId | null, rowIndex: number | null = null): void {
+  /**
+   * Report what the pointer is over. `point` is where it was, in plot px, and is
+   * optional because a hover can also come from a gutter row or a key press.
+   *
+   * The point is kept off the store on purpose: it changes with every pointer
+   * move, and a notifying field would rebuild a frame for each one. Nothing
+   * *draws* from it — it is read on demand, by a view deciding where to put
+   * something the pointer asked for.
+   */
+  setHovered(taskId: GanttId | null, rowIndex: number | null = null, point: Point | null = null): void {
+    this.hoverPointValue = point;
     const state = this.store.getState();
     if (state.hoveredTaskId === taskId && state.hoveredRowIndex === rowIndex) return;
     this.store.setState({ hoveredTaskId: taskId, hoveredRowIndex: rowIndex });
     this.events.emit('hover:change', { taskId, rowIndex });
+  }
+
+  /** Where the pointer was when the current hover was reported, plot px. */
+  get hoverPoint(): Point | null {
+    return this.hoverPointValue;
   }
 
   isCollapsed(groupId: GanttId): boolean {

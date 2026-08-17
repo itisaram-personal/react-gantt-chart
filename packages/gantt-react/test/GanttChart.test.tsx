@@ -627,6 +627,41 @@ describe('plot interaction', () => {
     }
   });
 
+  it('opens beside the pointer rather than at the end of the bar', () => {
+    const groups = [{ id: 'g0', label: 'Group 0' }];
+    const tasks = [{ id: 'g0-t0', groupId: 'g0', start: T0, end: T0 + 30 * DAY, data: { label: 'Long haul' } }];
+    const restore = stubBox(200, 60);
+    try {
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
+      const rect = engine.getTaskRect('g0-t0')!;
+      // A month-long bar fills the window, so its own edges are nowhere near the
+      // cursor — the case that makes bar-anchored placement useless.
+      expect(rect.width).toBeGreaterThan(PLOT_WIDTH / 2);
+
+      dispatch(plotOf(container), 'pointermove', { clientX: 120, clientY: rect.y + rect.height / 2 });
+
+      const tooltip = container.querySelector<HTMLElement>('.gantt-tooltip')!;
+      expect(Number.parseFloat(tooltip.style.left)).toBe(132);
+    } finally {
+      restore();
+    }
+  });
+
+  it('anchors to the bar when the hover arrived without a pointer', () => {
+    const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 4 });
+    const restore = stubBox(200, 60);
+    try {
+      const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
+      const rect = engine.getTaskRect('g0-t0')!;
+      run(() => engine.setHovered('g0-t0', 0));
+
+      const tooltip = container.querySelector<HTMLElement>('.gantt-tooltip')!;
+      expect(Number.parseFloat(tooltip.style.left)).toBeCloseTo(rect.x + rect.width + 12, 6);
+    } finally {
+      restore();
+    }
+  });
+
   it('holds the tooltip open while the pointer is inside it', async () => {
     const { tasks, groups } = fixtureData({ groups: 1, tasksPerGroup: 2 });
     const { container, engine } = mount({ tasks, groups, locale: 'en-US', tooltipOpenDelay: 0 });
