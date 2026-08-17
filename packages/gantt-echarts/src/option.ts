@@ -420,11 +420,20 @@ function interactionElements<T, G>(engine: GanttEngine<T, G>, theme: GanttTheme)
 
   const drag = state.drag;
   if (drag && drag.active) {
-    // Where the primary bar started, so the gesture reads as a move rather than
-    // a teleport. `getTaskRect` reads unmodified data, which is exactly the
-    // ghost position — the moved copy is drawn by the item series.
-    const origin = engine.getTaskRect(drag.originTaskId);
-    if (origin) {
+    // Where every dragged bar started, so the gesture reads as a move rather
+    // than a teleport — a multi-task drag leaves the whole selection behind,
+    // not just the bar under the pointer. `getTaskRect` reads unmodified data,
+    // which is exactly the ghost position; the moved copies are drawn by the
+    // item series.
+    const viewport = engine.viewport.state;
+    for (const taskId of drag.taskIds) {
+      const origin = engine.getTaskRect(taskId);
+      // A selection can reach far outside the frame (scrolled-away rows, bars
+      // panned off the time window); their ghosts would paint nothing.
+      if (!origin) continue;
+      if (origin.x + origin.width < 0 || origin.x > viewport.width) continue;
+      if (origin.y + origin.height < 0 || origin.y > viewport.height) continue;
+
       out.push({
         type: 'rect',
         shape: { ...origin, r: theme.metrics.itemRadius },

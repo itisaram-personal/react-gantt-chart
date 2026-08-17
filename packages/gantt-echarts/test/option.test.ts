@@ -403,6 +403,24 @@ describe('interaction series', () => {
     const moved = engine.getVisible().items.find((item) => item.task.id === task.id);
     expect(moved?.start).toBeGreaterThan(task.start);
   });
+
+  it('ghosts every task the drag carries, not just the one under the pointer', () => {
+    const { engine, theme } = fixture({ groups: 1, tasksPerGroup: 3 });
+    const [a, b] = engine.getTasks();
+    const before = { a: engine.getTaskRect(a.id)!, b: engine.getTaskRect(b.id)! };
+
+    engine.selection.handleClick(a.id);
+    engine.selection.handleClick(b.id, { ctrl: true });
+    engine.drag.begin(a.id, { x: before.a.x + 4, y: before.a.y + 4 });
+    engine.drag.move({ x: before.a.x + 80, y: before.a.y + 4 });
+
+    const elements = renderSeries(buildGanttOption({ engine, theme }), 'gantt-interaction');
+    const ghosts = ofType(elements, 'rect');
+    expect(ghosts).toHaveLength(2);
+    expect(ghosts.map((ghost) => (ghost.shape as { x: number }).x).sort((p, q) => p - q)).toEqual(
+      [before.a.x, before.b.x].sort((p, q) => p - q),
+    );
+  });
 });
 
 describe('overlay series', () => {
