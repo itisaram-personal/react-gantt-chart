@@ -124,6 +124,71 @@ body {
   min-height: 0;
 }
 
+/* ------------------------------------------------------------- view switch */
+
+.app__tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+}
+
+.app__tab {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--app-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.app__tab--on {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+/* ------------------------------------------------------------ linked charts */
+
+/*
+ * Three charts share the height one usually gets. Each still needs room for its
+ * header, a few rows and a zoom bar, so below the floor the column scrolls
+ * rather than squeezing them into strips.
+ */
+.app__linked {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.app__linked-chart {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 260px;
+}
+
+.app__linked-caption {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.app__linked-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app__toggle--off {
+  opacity: 0.45;
+}
+
 .app__stat {
   display: inline-flex;
   align-items: baseline;

@@ -51,6 +51,43 @@ export function Schedule() {
 every committed drag or resize and never mutates your data. Omit it and the
 engine keeps its own edited copy instead.
 
+### Several charts, one camera
+
+Stacked charts are only comparable if they show the same window. `useGanttSync`
+links their viewports — which is what links their zoom bars, since a bar is a
+view of a viewport rather than a state of its own.
+
+```tsx
+import { useState } from 'react';
+import { GanttChart, useGanttSync, type GanttEngine } from '@gantt-chart/react';
+
+export function Comparison({ crews }) {
+  const [top, setTop] = useState<GanttEngine | null>(null);
+  const [middle, setMiddle] = useState<GanttEngine | null>(null);
+  const [bottom, setBottom] = useState<GanttEngine | null>(null);
+
+  useGanttSync([top, middle, bottom]);
+
+  return (
+    <>
+      {[setTop, setMiddle, setBottom].map((capture, i) => (
+        <GanttChart key={i} tasks={crews[i]} engineRef={capture}
+                    showTimeZoomBar showRowZoomBar />
+      ))}
+    </>
+  );
+}
+```
+
+Pass the `useState` setter as `engineRef`, not a ref object: a ref filled during
+commit re-renders nothing, so the hook would never see the charts arrive. Nulls
+are expected and skipped, so the group forms as the charts mount.
+
+Both axes are linked by default; `useGanttSync(engines, { rows: false })` links
+the time axis alone, and `{ adopt: false }` leaves the charts where they are
+instead of starting them on the first one's window. Outside React,
+`syncGanttViewports(engines, options)` is the same thing and returns its teardown.
+
 ## How it is put together
 
 ```
@@ -121,6 +158,12 @@ bars — the part that can number in the thousands — go through the canvas.
   instead, so a stray drag pans rather than rescheduling work nobody aimed at —
   the click that selects it is the release of that same press. Turn it off with
   `interaction.dragSelectedOnly: false`.
+- **Linked charts** — `useGanttSync([a, b, c])` locks any number of charts to one
+  camera: both zoom bars move together, and so does every other way of moving a
+  chart. The time axis is shared as absolute *dates*, and the row axis as lane
+  height plus scroll fraction, so charts with different datasets, row counts and
+  domains still line up. Each chart clamps to its own limits rather than being
+  pushed past them. `syncGanttViewports` is the same thing without React.
 - **Undo/redo** — `GanttHistory` inverts change sets, so history costs nothing
   per task.
 - **PNG export** — `exportRef.current.download()` for what is on screen, or
@@ -154,7 +197,7 @@ a 100 000-task chart costs the same as panning a 1 000-task one.
 
 ```bash
 npm install
-npm test              # 219 tests across the packages
+npm test              # 460 tests across the packages
 npm run typecheck     # every package
 npm run build         # core → themes → echarts → react
 npm run dev           # the demo app on http://localhost:5174
@@ -162,6 +205,10 @@ npm run dev           # the demo app on http://localhost:5174
 
 The demo resolves the packages to *source*, so editing the engine hot-reloads
 without a build. Tests do the same through vitest aliases.
+
+It opens on two views: **Playground**, one chart with a control for everything
+the engine can be told to do, and **Linked charts**, three charts of 5, 34 and 68
+rows over three different calendars, sharing one camera through `useGanttSync`.
 
 Docs per package: [core](packages/gantt-core/README.md) ·
 [themes](packages/gantt-themes/README.md) ·

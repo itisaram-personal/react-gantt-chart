@@ -26,6 +26,8 @@ export type { GanttScrollbarProps } from './GanttScrollbar';
 export { GanttTimeZoomBar, GanttRowZoomBar } from './GanttZoomBar';
 export type { GanttTimeZoomBarProps, GanttRowZoomBarProps } from './GanttZoomBar';
 
+export { useGanttSync } from './useGanttSync';
+
 export { GanttTooltip } from './GanttTooltip';
 export type { GanttTooltipProps, GanttTooltipContext } from './GanttTooltip';
 
@@ -60,7 +62,8 @@ export type {
   TaskChange,
   ViewportState,
 } from '@gantt-chart/core';
-export { GanttHistory } from '@gantt-chart/core';
+export { GanttHistory, syncGanttViewports } from '@gantt-chart/core';
+export type { GanttSyncOptions } from '@gantt-chart/core';
 export type {
   GanttDependency,
   GanttExportOptions,

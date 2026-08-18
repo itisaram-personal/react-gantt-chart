@@ -38,6 +38,8 @@ export { DragEngine } from './engine/drag';
 export type { DragBeginOptions, DragConstraint } from './engine/drag';
 
 export { ViewportController } from './engine/viewport';
+export { syncGanttViewports } from './engine/sync';
+export type { GanttSyncOptions } from './engine/sync';
 export { ContextMenuEngine } from './engine/contextMenu';
 export type { OpenContextMenuInput } from './engine/contextMenu';
 

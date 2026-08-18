@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   GanttHistory,
   applyChanges,
@@ -21,6 +21,8 @@ import {
   type GanttExportScope,
 } from "@gantt-chart/react";
 import "@gantt-chart/react/styles.css";
+import { LinkedCharts } from "./LinkedCharts";
+import { Stat, Toggle } from "./controls";
 import {
   generate,
   statusColor,
@@ -130,13 +132,26 @@ const ROW_FILTERS: { value: RowFilter; label: string; title: string }[] = [
   },
 ];
 
-export function App(): JSX.Element {
+/** Which demo is on screen. */
+type View = "playground" | "linked";
+
+interface ViewProps {
+  dark: boolean;
+  setDark: (dark: boolean) => void;
+  /** The view switch, rendered into each view's own title bar. */
+  tabs: ReactNode;
+}
+
+/**
+ * The demo proper: one chart, and a control for everything the engine can be
+ * told to do.
+ */
+function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
   const [taskCount, setTaskCount] = useState(10_000);
   const [tasksPerRow, setTasksPerRow] = useState(100);
   const [rowMode, setRowMode] = useState<RowMode>("projects");
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
   const [maxLanes, setMaxLanes] = useState(64);
-  const [dark, setDark] = useState(true);
   const [stacking, setStacking] = useState(true);
   const [uniformRows, setUniformRows] = useState(true);
   const [rollup, setRollup] = useState(true);
@@ -597,6 +612,7 @@ export function App(): JSX.Element {
           <span className="app__muted">ECharts custom series · virtualized engine</span>
         </div>
 
+        {tabs}
         <label className="app__field">
           Tasks
           <select value={taskCount} onChange={(event) => setTaskCount(Number(event.target.value))}>
@@ -961,34 +977,48 @@ function fromDateInput(value: string): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
-function Toggle({
-  label,
-  checked,
-  onChange,
-  title,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  title?: string;
-}): JSX.Element {
-  return (
-    <label className="app__toggle" title={title}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      {label}
-    </label>
-  );
+/**
+ * Owns only what the two views have to agree on.
+ *
+ * `dark` is lifted so switching views does not throw the theme away; everything
+ * else each view keeps to itself, and unmounting a view disposes its engines
+ * with it.
+ */
+export function App(): JSX.Element {
+  const [view, setView] = useState<View>("playground");
+  const [dark, setDark] = useState(true);
+
+  const tabs = <ViewTabs view={view} onView={setView} />;
+  const props = { dark, setDark, tabs };
+
+  return view === "playground" ? <Playground {...props} /> : <LinkedCharts {...props} />;
 }
 
-function Stat({ label, value }: { label: string; value: string }): JSX.Element {
+const VIEWS: { value: View; label: string; title: string }[] = [
+  { value: "playground", label: "Playground", title: "One chart, and every option it has" },
+  {
+    value: "linked",
+    label: "Linked charts",
+    title: "Three charts sharing one camera, zoom bars included",
+  },
+];
+
+function ViewTabs({ view, onView }: { view: View; onView: (view: View) => void }): JSX.Element {
   return (
-    <span className="app__stat">
-      <span className="app__muted">{label}</span>
-      <strong>{value}</strong>
-    </span>
+    <div className="app__tabs" role="tablist" aria-label="Demo">
+      {VIEWS.map((entry) => (
+        <button
+          key={entry.value}
+          type="button"
+          role="tab"
+          aria-selected={view === entry.value}
+          className={`app__tab${view === entry.value ? " app__tab--on" : ""}`}
+          title={entry.title}
+          onClick={() => onView(entry.value)}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
   );
 }
