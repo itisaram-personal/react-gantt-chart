@@ -221,8 +221,10 @@ describe('row gutter interaction', () => {
  * for styling, and that the plot then ignores input aimed at the row's bars.
  */
 describe('row enable toggle', () => {
-  const powers = (container: HTMLElement): HTMLButtonElement[] =>
-    Array.from(container.querySelectorAll<HTMLButtonElement>('.gantt-gutter__power'));
+  // Widened past HTMLButtonElement: `enableRowToggle={false}` draws the same
+  // mark as a plain span.
+  const powers = (container: HTMLElement): HTMLElement[] =>
+    Array.from(container.querySelectorAll<HTMLElement>('.gantt-gutter__power'));
 
   it('gives every row a button that toggles the row', () => {
     const { tasks, groups } = fixtureData({ groups: 3 });
@@ -250,6 +252,42 @@ describe('row enable toggle', () => {
   it('can be left out entirely', () => {
     const { tasks, groups } = fixtureData({ groups: 2 });
     const { container } = mount({ tasks, groups, showRowEnableToggle: false });
+    expect(powers(container)).toHaveLength(0);
+  });
+
+  it('can be shown without being usable', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const onRowDisabledChange = vi.fn();
+    const { container, engine } = mount({
+      tasks,
+      groups: groups.map((group) => (group.id === 'g1' ? { ...group, disabled: true } : group)),
+      enableRowToggle: false,
+      onRowDisabledChange,
+    });
+
+    // Only the row that is off is marked, and the mark is not a button.
+    const marks = powers(container);
+    expect(marks).toHaveLength(1);
+    expect(marks[0].tagName).toBe('SPAN');
+    expect(marks[0].className).toContain('is-static');
+    expect(marks[0].getAttribute('aria-label')).toBe('Group 1 disabled');
+
+    dispatch(marks[0], 'click');
+    expect(engine.isRowDisabled('g1')).toBe(true);
+    expect(onRowDisabledChange).not.toHaveBeenCalled();
+  });
+
+  it('follows the engine while read-only', () => {
+    const { tasks, groups } = fixtureData({ groups: 2 });
+    const { container, engine } = mount({ tasks, groups, enableRowToggle: false });
+
+    expect(powers(container)).toHaveLength(0);
+
+    run(() => engine.setRowDisabled('g0', true));
+    expect(powers(container)).toHaveLength(1);
+    expect(container.querySelectorAll('.gantt-gutter__row.is-disabled')).toHaveLength(1);
+
+    run(() => engine.enableAllRows());
     expect(powers(container)).toHaveLength(0);
   });
 

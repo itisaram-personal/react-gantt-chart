@@ -66,6 +66,7 @@ const undo = () => {
 | `exportRef` | a PNG exporter for this chart (see below) |
 | `exportOptions` | defaults for every export call |
 | `showHeader` / `showRowGutter` / `showRowMenu` / `showRowEnableToggle` / `showScrollbar` / `showGrid` / `showRowBands` | drop chrome |
+| `enableRowToggle` | `false` leaves the gutter's disabled sign as a read-only marker |
 
 Callbacks: `onSelectionChange`, `onTaskClick`, `onTaskDoubleClick`, `onRowToggle`,
 `onRowDisabledChange`, `onViewportChange`, and `onDragEnd` (below).
@@ -286,7 +287,26 @@ From the engine: `engine.setRowDisabled(id, true)`, `engine.toggleRowDisabled(id
 `engine.isRowDisabled(id)`, `engine.setDisabledRows(ids)` (switch off exactly
 these, on everything else), `engine.enableAllRows()`, and the `row:disable`
 event, which is what the prop is wired to.
-`showRowEnableToggle={false}` drops the button without giving up the API.
+`showRowEnableToggle={false}` drops the button without giving up the API, and
+`enableRowToggle={false}` keeps the sign but not the control — a row that is off
+still shows it in the gutter, a row that is on shows nothing, and neither takes a
+click. That is the shape for a chart whose rows are switched somewhere else (a
+toolbar, a saved view, the server) but should still say which ones are off:
+
+```tsx
+<GanttChart
+  tasks={tasks}
+  groups={groups}
+  enableRowToggle={false}
+  // The menus keep their own "Disable row" item. Both callbacks *replace* the
+  // built-in list rather than filter it, so a chart that is read-only
+  // throughout spells out what it still offers.
+  contextMenuItems={(menu, engine) => [
+    { id: 'fit', label: 'Fit to timeline', onSelect: () => engine.viewport.fitTime() },
+  ]}
+  rowMenuItems={() => []}
+/>
+```
 
 Whether a disabled row blocks interaction at all is yours to set:
 

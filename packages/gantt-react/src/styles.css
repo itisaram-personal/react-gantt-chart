@@ -405,6 +405,20 @@
   outline-offset: -2px;
 }
 
+/*
+  The read-only marker. It is only ever drawn for a row that is already off, so
+  it inherits `is-off`'s always-visible accent and gives up every trace of a
+  control: no pointer, no hover fill. Pointer events stay on so the title shows.
+*/
+.gantt-gutter__power.is-static {
+  cursor: default;
+}
+
+.gantt-gutter__power.is-static:hover {
+  background: transparent;
+  color: var(--gantt-accent);
+}
+
 @media (hover: none) {
   .gantt-gutter__power {
     opacity: 1;

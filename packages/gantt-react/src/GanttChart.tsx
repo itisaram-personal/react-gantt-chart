@@ -210,6 +210,14 @@ export interface GanttChartProps<T = unknown, G = unknown> {
    * the UI (`engine.setRowDisabled` still works).
    */
   showRowEnableToggle?: boolean;
+  /**
+   * Whether that button acts. On by default; `false` turns it into a read-only
+   * marker — a disabled row still says so in the gutter, an enabled one shows
+   * nothing, and rows can then only be switched from code. The right-click and
+   * ⋯ menus keep their own "Disable row" item — for a chart that is read-only
+   * throughout, replace their contents with `contextMenuItems` / `rowMenuItems`.
+   */
+  enableRowToggle?: boolean;
   showScrollbar?: boolean;
   showGrid?: boolean;
   showRowBands?: boolean;
@@ -302,6 +310,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
     showRowGutter = true,
     showRowMenu = true,
     showRowEnableToggle = true,
+    enableRowToggle = true,
     showScrollbar = true,
     showGrid,
     showRowBands,
@@ -489,6 +498,7 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
             renderRow={props.renderRow}
             showRowMenu={showRowMenu}
             showRowEnableToggle={showRowEnableToggle}
+            enableRowToggle={enableRowToggle}
             rowMenuItems={props.rowMenuItems}
           />
         ) : null}

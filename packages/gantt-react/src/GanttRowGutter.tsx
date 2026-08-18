@@ -29,6 +29,13 @@ export interface GanttRowGutterProps<T, G> {
    */
   showRowEnableToggle?: boolean;
   /**
+   * Let that button act. Default true; `false` keeps the state on screen and
+   * takes the control away — a row that is off still shows the sign, a row that
+   * is on shows nothing, and neither one takes a click. Only meaningful
+   * alongside `showRowEnableToggle`, which drops the whole thing.
+   */
+  enableRowToggle?: boolean;
+  /**
    * Items for that menu. Called once per *visible* row during render purely to
    * decide whether the button is worth showing — return an empty array to leave
    * a row without one — so keep it cheap and free of side effects.
@@ -53,6 +60,7 @@ export function GanttRowGutter<T, G>({
   renderRow,
   showRowMenu = true,
   showRowEnableToggle = true,
+  enableRowToggle = true,
   rowMenuItems,
 }: GanttRowGutterProps<T, G>): JSX.Element {
   const { viewport, hoveredRowIndex, menuRowIndex } = useEngineState(
@@ -136,7 +144,13 @@ export function GanttRowGutter<T, G>({
               <span className="gantt-gutter__text" title={row.label}>
                 {row.label}
               </span>
-              {showRowEnableToggle ? <RowEnableButton engine={engine} row={row} /> : null}
+              {showRowEnableToggle ? (
+                enableRowToggle ? (
+                  <RowEnableButton engine={engine} row={row} />
+                ) : (
+                  <RowDisabledMark row={row} />
+                )
+              ) : null}
               {/*
                 Only asked of a caller-supplied factory: the built-in items are
                 never empty, so the default path must not pay for a per-row,
@@ -194,23 +208,51 @@ function RowEnableButton<T, G>({
       // The row's own double-click means something else entirely.
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      {/*
-        A forbidden sign in both states — drawn rather than typed, because no
-        font ships the glyph reliably. Which state it means is carried by
-        colour: muted while the row is on (the action available), accented once
-        it is off (the state it is in).
-      */}
-      <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
-        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
-        <path
-          d="M4 4l8 8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-        />
-      </svg>
+      <ForbiddenSign />
     </button>
+  );
+}
+
+/**
+ * The read-only stand-in for that button, used when `enableRowToggle` is false.
+ *
+ * A chart that switches its rows off from elsewhere — a toolbar, a saved view,
+ * the server — still owes the gutter an answer to "why is this row faded?".
+ * This is that answer and nothing more: the same sign in the same place, with
+ * no button around it. A row that is *on* draws nothing, because a disable
+ * affordance that cannot be clicked is a promise the chart will not keep.
+ */
+function RowDisabledMark<G>({ row }: { row: AxisRowDescriptor<G> }): JSX.Element | null {
+  if (!row.disabled) return null;
+  return (
+    <span
+      className="gantt-gutter__power is-off is-static"
+      role="img"
+      aria-label={`${row.label} disabled`}
+      title={row.inert ? 'Row disabled — interactions ignored' : 'Row disabled'}
+    >
+      <ForbiddenSign />
+    </span>
+  );
+}
+
+/**
+ * A forbidden sign — drawn rather than typed, because no font ships the glyph
+ * reliably. Which state it means is carried by colour: muted while the row is
+ * on (the action available), accented once it is off (the state it is in).
+ */
+function ForbiddenSign(): JSX.Element {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M4 4l8 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

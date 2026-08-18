@@ -162,6 +162,7 @@ function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
   const [enableSelection, setEnableSelection] = useState(true);
   /** Do the faded rows refuse input, or are they only marked? */
   const [blockDisabledRows, setBlockDisabledRows] = useState(true);
+  const [rowEnableToggle, setRowEnableToggle] = useState(true);
   const [marqueeSelection, setMarqueeSelection] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
   const [selection, setSelection] = useState<GanttId[]>([]);
@@ -750,6 +751,12 @@ function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
           onChange={setBlockDisabledRows}
           title="Off: a disabled row is only faded, and every gesture works on it as usual"
         />
+        <Toggle
+          label="Row toggle"
+          checked={rowEnableToggle}
+          onChange={setRowEnableToggle}
+          title="Off: the gutter's ⊘ only reports an off row, never switches one — right-click a row for that"
+        />
 
         <TimeRangePicker engine={engine} />
 
@@ -859,6 +866,7 @@ function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
           showTimeZoomBar={true}
           showRowZoomBar={true}
           showScrollbar={false}
+          enableRowToggle={rowEnableToggle}
         />
       </div>
 

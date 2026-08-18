@@ -197,7 +197,7 @@ a 100 000-task chart costs the same as panning a 1 000-task one.
 
 ```bash
 npm install
-npm test              # 460 tests across the packages
+npm test              # 462 tests across the packages
 npm run typecheck     # every package
 npm run build         # core → themes → echarts → react
 npm run dev           # the demo app on http://localhost:5174
