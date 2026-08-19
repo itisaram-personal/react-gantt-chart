@@ -37,21 +37,28 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      - name: Check versions agree
+      # Packages version independently now (a themes-only fix shouldn't force
+      # a react/core/echarts bump too). This is just a sanity check that a
+      # pushed tag corresponds to an actual bump, not a lockstep requirement.
+      - name: Check tag matches a package version
         run: |
-          expected=$(node -p "require('./packages/gantt-core/package.json').version")
-          for pkg in themes echarts react; do
-            actual=$(node -p "require('./packages/gantt-$pkg/package.json').version")
-            if [ "$actual" != "$expected" ]; then
-              echo "::error::@gantt-chart/$pkg is $actual but core is $expected"
-              exit 1
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "Not a tag push (workflow_dispatch) — skipping tag check."
+            exit 0
+          fi
+          tag_version="${GITHUB_REF_NAME#v}"
+          match=false
+          for pkg in core themes echarts react; do
+            version=$(node -p "require('./packages/gantt-$pkg/package.json').version")
+            if [ "$version" = "$tag_version" ]; then
+              echo "@gantt-chart/$pkg is $version — matches tag $GITHUB_REF_NAME"
+              match=true
             fi
           done
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$expected" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match version $expected"
+          if [ "$match" != true ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match any package version"
             exit 1
           fi
-          echo "Releasing $expected"
 
       # Dependency order: core -> themes -> echarts -> react.
       # Already-published versions are skipped so a re-run after a partial

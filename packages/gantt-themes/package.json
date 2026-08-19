@@ -1,6 +1,6 @@
 {
   "name": "@gantt-chart/themes",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "Light and dark themes for the Gantt chart.",
   "license": "MIT",
   "repository": {
@@ -25,7 +25,10 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
