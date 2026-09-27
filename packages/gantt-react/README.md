@@ -62,6 +62,7 @@ const undo = () => {
 | `headerCorner` | content for the corner above the gutter |
 | `markers` | vertical lines at fixed instants (see below) |
 | `renderer` | `'canvas'` (default) or `'svg'` |
+| `initialTimeRange` | `[start, end]` in ms to open on instead of the whole domain; read once, when the first tasks arrive |
 | `engineRef` | the engine, for toolbars, exports and undo |
 | `exportRef` | a PNG exporter for this chart (see below) |
 | `exportOptions` | defaults for every export call |

@@ -287,16 +287,15 @@ function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
   }, [tasks, axis.kept]);
 
   /**
-   * Frame roughly six weeks around today. The engine's own default is to fit the
-   * whole domain, which here is 18 months — correct, but every bar would be a
-   * sliver. "Fit" in the toolbar goes back to that view.
+   * Open on roughly six weeks around today. The engine's own default is to fit
+   * the whole domain, which here is 18 months — correct, but every bar would be
+   * a sliver. "Fit" in the toolbar goes back to that view.
    */
+  const [initialTimeRange] = useState(() => {
+    const start = Date.now() - 15 * DAY;
+    return [start, start + 30 * DAY] as const;
+  });
   const [engine, setEngine] = useState<GanttEngine<DemoTaskData, DemoGroupData> | null>(null);
-  useEffect(() => {
-    if (!engine) return;
-    const start = Date.now() - 7 * DAY;
-    engine.viewport.setTimeRange(start, start + 45 * DAY);
-  }, [engine, dataset]);
 
   const history = useMemo(() => new GanttHistory({ limit: 200 }), []);
   const [historyDepth, setHistoryDepth] = useState({ undo: 0, redo: 0 });
@@ -857,6 +856,7 @@ function Playground({ dark, setDark, tabs }: ViewProps): JSX.Element {
           onRowDisabledChange={countRows}
           onRowToggle={countRows}
           rowMenuItems={rowMenuItems}
+          initialTimeRange={initialTimeRange}
           engineRef={setEngine}
           exportRef={exporter}
           headerCorner={<span>{rowCounts.total.toLocaleString()} rows</span>}

@@ -146,6 +146,32 @@ describe('data and option props', () => {
     expect(harness.engine.viewport.span).toBe(span);
   });
 
+  it('opens on initialTimeRange instead of the whole domain', () => {
+    const { tasks, groups } = fixtureData();
+    const harness = mount({ tasks, groups, initialTimeRange: [T0 + DAY, T0 + 3 * DAY] });
+
+    expect(harness.engine.viewport.state.timeStart).toBe(T0 + DAY);
+    expect(harness.engine.viewport.state.timeEnd).toBe(T0 + 3 * DAY);
+  });
+
+  it('holds initialTimeRange until the first tasks arrive', () => {
+    const { tasks, groups } = fixtureData();
+    const harness = mount({ tasks: [], groups, initialTimeRange: [T0 + DAY, T0 + 3 * DAY] });
+
+    harness.rerender({ tasks });
+    expect(harness.engine.viewport.state.timeStart).toBe(T0 + DAY);
+    expect(harness.engine.viewport.state.timeEnd).toBe(T0 + 3 * DAY);
+  });
+
+  it('ignores initialTimeRange changes after it has been applied', () => {
+    const { tasks, groups } = fixtureData();
+    const harness = mount({ tasks, groups, initialTimeRange: [T0 + DAY, T0 + 3 * DAY] });
+
+    harness.rerender({ initialTimeRange: [T0, T0 + DAY], tasks: [...tasks] });
+    expect(harness.engine.viewport.state.timeStart).toBe(T0 + DAY);
+    expect(harness.engine.viewport.state.timeEnd).toBe(T0 + 3 * DAY);
+  });
+
   it('pushes option changes into the engine', () => {
     const { tasks, groups } = fixtureData();
     const harness = mount({ tasks, groups });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
 import {
   applyChanges,
   defaultOptions,
@@ -158,6 +158,18 @@ export interface GanttChartProps<T = unknown, G = unknown> {
    */
   onRowDisabledChange?: (row: GanttRow<G>, disabled: boolean) => void;
   onViewportChange?: (viewport: ViewportState) => void;
+  /**
+   * The time window to open on, as `[start, end]` in ms. Without it the chart
+   * frames the whole data domain.
+   *
+   * Read once: it is applied the first time the chart has tasks — on mount, or
+   * when data loaded asynchronously arrives — and later changes are ignored, so
+   * it never fights the user's panning and zooming. To move the camera
+   * afterwards, call `engine.viewport.setTimeRange` through `engineRef`, which
+   * is also what this does: the range is clamped to `minTimeSpan`/`maxTimeSpan`
+   * and kept inside the data domain.
+   */
+  initialTimeRange?: readonly [start: number, end: number];
 
   itemRenderer?: GanttItemRenderer<T, G>;
   dependencies?: readonly GanttDependency[];
@@ -353,6 +365,23 @@ export function GanttChart<T = unknown, G = unknown>(props: GanttChartProps<T, G
   }, [dependencyPlugin, props.plugins]);
 
   const engine = useGanttEngine<T, G>({ tasks, groups, options: engineOptions, plugins });
+
+  // Frames the opening window once, as soon as there is data to frame — before
+  // that the domain is a placeholder the range would be clamped into. Tasks from
+  // the first render are already in the engine, so a layout effect gets there
+  // before the first paint; tasks that arrive later are handed over by
+  // `useGanttEngine`'s own effect, which runs ahead of the second one below.
+  const initialTimeRange = useRef(props.initialTimeRange);
+  const applyInitialTimeRange = (): void => {
+    const range = initialTimeRange.current;
+    if (!range || engine.getTasks().length === 0) return;
+    initialTimeRange.current = undefined;
+    engine.viewport.setTimeRange(range[0], range[1]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(applyInitialTimeRange, [engine]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(applyInitialTimeRange, [engine, tasks]);
 
   useEffect(() => {
     dependencyPlugin?.setTheme(theme);
